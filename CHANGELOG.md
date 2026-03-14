@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-03-14 - Release Candidate `v19.0.21.0.0`
+
+### `l10n_cz_vat_filing` `19.0.21.0.0`
+- Added Czech VAT-registry shield settings on company (`API URL`, timeout, cache TTL, blocking policy toggles).
+- Added cached supplier registry-check model for audit and re-use (`l10n_cz.vat.registry.check`).
+- Added vendor-bill posting guard (`in_invoice`, `in_refund`) for unreliable payer and unpublished supplier bank-account checks.
+- Added supplier-payment posting guard (`account.payment` outbound supplier payments) using the same registry evaluation.
+- Added vendor-document audit fields: latest registry check link and note.
+- Added automated tests for unreliable-payer blocking, bank mismatch blocking, positive pass path, cache reuse, and lookup-error non-blocking mode.
+
 ## 2026-03-14 - Release Candidate `v19.0.20.0.0`
 
 ### `l10n_cz_vat_filing` `19.0.20.0.0`
@@ -13,4 +23,3 @@
 
 ### `odoo19_report_compat` `19.0.1.0.0`
 - No code changes in this release candidate.
-

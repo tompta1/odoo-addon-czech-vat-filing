@@ -1,4 +1,5 @@
 from odoo import fields, models
+from odoo.exceptions import UserError
 
 
 class AccountMove(models.Model):
@@ -116,9 +117,51 @@ class AccountMove(models.Model):
         digits=(16, 2),
         help="Special Czech DPH row 60 long-term adjustment amount under sections 78 to 78d.",
     )
+    l10n_cz_vat_registry_check_id = fields.Many2one(
+        "l10n_cz.vat.registry.check",
+        string="CZ VAT Registry Check",
+        readonly=True,
+        copy=False,
+    )
+    l10n_cz_vat_registry_note = fields.Text(
+        string="CZ VAT Registry Note",
+        readonly=True,
+        copy=False,
+        help="Latest VAT-registry shield result captured for this vendor document.",
+    )
 
     def l10n_cz_kh_draft_payload(self):
         return self.env["l10n_cz.kh.draft.export"].build_payload(self)
 
     def l10n_cz_kh_draft_json(self):
         return self.env["l10n_cz.kh.draft.export"].build_json(self)
+
+    def _l10n_cz_registry_bank_account_number(self):
+        self.ensure_one()
+        return (self.partner_bank_id.acc_number or "").strip()
+
+    def _l10n_cz_check_registry_shield(self):
+        for move in self:
+            if move.move_type not in {"in_invoice", "in_refund"}:
+                continue
+            company = move.company_id
+            if not company.l10n_cz_vat_registry_enabled or not company.l10n_cz_vat_registry_block_on_post:
+                continue
+            evaluation = company.l10n_cz_vat_registry_evaluate_partner(
+                move.commercial_partner_id,
+                bank_account=move._l10n_cz_registry_bank_account_number(),
+            )
+            note_lines = list(evaluation["messages"])
+            note_lines.extend(evaluation["violations"])
+            move.write(
+                {
+                    "l10n_cz_vat_registry_check_id": evaluation["check"].id or False,
+                    "l10n_cz_vat_registry_note": "\n".join(note_lines),
+                }
+            )
+            if evaluation["violations"]:
+                raise UserError("\n".join(evaluation["violations"]))
+
+    def action_post(self):
+        self._l10n_cz_check_registry_shield()
+        return super().action_post()

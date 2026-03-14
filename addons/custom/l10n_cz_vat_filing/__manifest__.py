@@ -1,7 +1,7 @@
 {
     "name": "Czech VAT Filing",
     "summary": "Generate Czech DPH, KH, and souhrnne hlaseni exports from Odoo data",
-    "version": "19.0.20.0.0",
+    "version": "19.0.21.0.0",
     "category": "Accounting/Localizations",
     "license": "LGPL-3",
     "author": "OpenAI Codex",

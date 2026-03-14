@@ -23,6 +23,7 @@ The supported XML scope is the baseline microSME path already classified by `l10
 - bad-debt correction rows `VAT 33/34`, including `KH A4/B2` detail with `zdph_44="P"`
 - automatic domestic `KH` threshold routing (`10.000 CZK`) for `A4/A5` and `B2/B3`, evaluated in `CZK` (including foreign-currency invoices)
 - domestic B2B refunds under `10.000 CZK` are detail-routed to `A4/B2` only when linked to an over-threshold origin invoice
+- optional Czech VAT-registry shield checks for supplier reliability and published bank-account matching on vendor bills and supplier payments
 - asset-acquisition information row `VAT 47`
 - coefficient-base rows `VAT 50` and `VAT 51`
 - tax-refund row `VAT 61`
@@ -113,11 +114,23 @@ Additional filing controls exposed on `account.move`:
 - `CZ DPH Line 48 Full Deduction`
 - `CZ DPH Line 48 Reduced Deduction`
 - `CZ DPH Line 60 Adjustment`
+- `CZ VAT Registry Check`
+- `CZ VAT Registry Note`
 
 Additional filing controls exposed on `res.company`:
 
 - `Use Manual CZ DPH Advance Coefficient`
 - `CZ DPH Advance Coefficient`
+- `Enable CZ VAT Registry Shield`
+- `CZ VAT Registry API URL`
+- `CZ VAT Registry VAT Parameter`
+- `CZ VAT Registry Timeout (s)`
+- `CZ VAT Registry Cache (h)`
+- `Block Vendor Bills On Registry Risk`
+- `Block Supplier Payments On Registry Risk`
+- `Block Unreliable VAT Payers`
+- `Block Unpublished Supplier Bank Accounts`
+- `Block On VAT Registry Lookup Errors`
 
 Built-in Odoo UI export wizard:
 
