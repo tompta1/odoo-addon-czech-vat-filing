@@ -1,3 +1,4 @@
+import base64
 from unittest.mock import patch
 
 from odoo.exceptions import UserError
@@ -158,4 +159,60 @@ class TestL10nCzIsdsSubmission(TransactionCase):
 
         self.assertEqual(history.isds_status, "error")
         self.assertIn("rejected", (history.isds_last_error or "").lower())
+        self.assertEqual(action.get("tag"), "display_notification")
+
+    def test_http_json_submission_attaches_delivery_receipt(self):
+        history = self._new_history("HTTP-ISDS-RECEIPT")
+        self.company.write(
+            {
+                "l10n_cz_isds_enabled": True,
+                "l10n_cz_isds_mode": "http_json",
+                "l10n_cz_isds_api_url": "https://isds-bridge.example.test/submit",
+                "l10n_cz_isds_username": "api-user",
+                "l10n_cz_isds_password": "api-pass",
+                "l10n_cz_isds_target_box_id": "pndaab6",
+            }
+        )
+        receipt_base64 = base64.b64encode(b"%PDF-1.4 test receipt").decode("ascii")
+        captured = {}
+        with self._patch_http_response(
+            (
+                '{"status":"ok","message_id":"ISDS-RECEIPT-1",'
+                '"delivery_receipt_base64":"%s","delivery_receipt_filename":"dorucenka.pdf"}'
+            )
+            % (receipt_base64,),
+            captured,
+        ):
+            history.action_submit_isds()
+
+        self.assertEqual(history.isds_status, "submitted")
+        self.assertTrue(history.isds_receipt_attachment_id)
+        self.assertEqual(history.isds_receipt_attachment_id.name, "dorucenka.pdf")
+        raw = history.isds_receipt_attachment_id.datas or b""
+        if isinstance(raw, str):
+            raw = raw.encode("ascii")
+        self.assertIn(b"%PDF-1.4", base64.b64decode(raw))
+
+    def test_http_json_invalid_delivery_receipt_sets_error(self):
+        history = self._new_history("HTTP-ISDS-RECEIPT-BAD")
+        self.company.write(
+            {
+                "l10n_cz_isds_enabled": True,
+                "l10n_cz_isds_mode": "http_json",
+                "l10n_cz_isds_api_url": "https://isds-bridge.example.test/submit",
+                "l10n_cz_isds_target_box_id": "pndaab6",
+            }
+        )
+        captured = {}
+        with self._patch_http_response(
+            (
+                '{"status":"ok","message_id":"ISDS-RECEIPT-ERR",'
+                '"delivery_receipt_base64":"not-base64!!"}'
+            ),
+            captured,
+        ):
+            action = history.action_submit_isds()
+
+        self.assertEqual(history.isds_status, "error")
+        self.assertIn("invalid base64", (history.isds_last_error or "").lower())
         self.assertEqual(action.get("tag"), "display_notification")

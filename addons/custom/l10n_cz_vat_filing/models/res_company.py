@@ -1,4 +1,5 @@
 import base64
+import binascii
 import calendar
 import hashlib
 import json
@@ -721,6 +722,68 @@ class ResCompany(models.Model):
             "attachments": self._l10n_cz_isds_collect_history_attachments(history),
         }
 
+    def _l10n_cz_isds_extract_delivery_receipt(self, response_payload):
+        self.ensure_one()
+        if not isinstance(response_payload, dict):
+            return None
+
+        nested_payload = (
+            response_payload.get("delivery_receipt")
+            or response_payload.get("deliveryReceipt")
+            or response_payload.get("receipt")
+        )
+        source = nested_payload if isinstance(nested_payload, dict) else response_payload
+
+        content_base64 = (
+            source.get("content_base64")
+            or source.get("contentBase64")
+            or source.get("delivery_receipt_base64")
+            or source.get("deliveryReceiptBase64")
+            or source.get("receipt_base64")
+            or source.get("receiptBase64")
+            or source.get("dorucenka_base64")
+        )
+        if not content_base64:
+            return None
+
+        if isinstance(content_base64, bytes):
+            content_base64 = content_base64.decode("ascii", errors="ignore")
+        content_base64 = str(content_base64).strip()
+        if not content_base64:
+            return None
+
+        try:
+            base64.b64decode(content_base64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise UserError(
+                _("ISDS bridge returned a delivery receipt with invalid base64 content.")
+            ) from exc
+
+        filename = (
+            source.get("filename")
+            or source.get("file_name")
+            or source.get("delivery_receipt_filename")
+            or source.get("deliveryReceiptFilename")
+            or source.get("receipt_filename")
+            or "isds_delivery_receipt.pdf"
+        )
+        filename = str(filename or "isds_delivery_receipt.pdf").strip().replace("/", "_").replace("\\", "_")
+        if not filename:
+            filename = "isds_delivery_receipt.pdf"
+        mimetype = (
+            source.get("mimetype")
+            or source.get("mime_type")
+            or source.get("delivery_receipt_mimetype")
+            or source.get("deliveryReceiptMimetype")
+            or source.get("receipt_mimetype")
+            or "application/pdf"
+        )
+        return {
+            "filename": str(filename or "isds_delivery_receipt.pdf"),
+            "mimetype": str(mimetype or "application/pdf"),
+            "content_base64": content_base64,
+        }
+
     def _l10n_cz_isds_submit_mock(self, payload):
         self.ensure_one()
         digest_seed = "|".join(
@@ -790,6 +853,7 @@ class ResCompany(models.Model):
         )
         if not message_id:
             raise UserError(_("ISDS bridge did not return a message identifier."))
+        delivery_receipt = self._l10n_cz_isds_extract_delivery_receipt(response_payload)
         return {
             "message_id": str(message_id),
             "delivery_info": (
@@ -798,6 +862,7 @@ class ResCompany(models.Model):
                 or response_payload.get("message")
                 or ""
             ),
+            "delivery_receipt": delivery_receipt,
             "raw_response": response_payload,
         }
 

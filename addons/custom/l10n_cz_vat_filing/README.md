@@ -149,6 +149,17 @@ Additional filing controls exposed on `res.company`:
 - `CZ VAT FX Cache (days)`
 - `Block On VAT FX Lookup Errors`
 - default FX endpoint is prefilled to official ČNB `denni_kurz.txt`, parsed in native TXT format with `date=DD.MM.YYYY`
+- `Enable Datova Schranka Submission`
+- `ISDS Submission Mode` (`mock` or `http_json`)
+- `ISDS Bridge API URL`, `ISDS Bridge Username`, `ISDS Bridge Password`
+- `ISDS Sender Databox ID`, `ISDS Target Databox ID`, `ISDS Timeout (s)`
+
+ISDS bridge response contract (HTTP JSON mode):
+
+- success indicators: `status`/`result`/`success` (`ok`, `success`, `submitted`, `true`, or boolean `true`)
+- message identifier: `message_id` (fallback `messageId` or `id`)
+- optional delivery receipt fields: `delivery_receipt_base64` (+ optional filename/mimetype keys)
+- when delivery receipt base64 is present and valid, it is persisted as `ISDS Delivery Receipt` attachment in filing history
 
 Built-in Odoo UI export wizard:
 

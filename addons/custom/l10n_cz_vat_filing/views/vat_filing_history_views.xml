@@ -53,6 +53,7 @@
               <field name="dphkh1_attachment_id" readonly="1"/>
               <field name="dphshv_attachment_id" readonly="1"/>
               <field name="debug_attachment_id" readonly="1"/>
+              <field name="isds_receipt_attachment_id" readonly="1"/>
             </group>
           </group>
           <group string="Datova Schranka (ISDS)">

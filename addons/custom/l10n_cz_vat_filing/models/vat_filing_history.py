@@ -1,4 +1,5 @@
 import base64
+import binascii
 import io
 import json
 import zipfile
@@ -43,6 +44,12 @@ class L10nCzVatFilingHistory(models.Model):
     isds_delivery_info = fields.Text(string="ISDS Delivery Info", readonly=True)
     isds_last_error = fields.Text(string="ISDS Last Error", readonly=True)
     isds_response_json = fields.Text(string="ISDS Response JSON", readonly=True)
+    isds_receipt_attachment_id = fields.Many2one(
+        "ir.attachment",
+        string="ISDS Delivery Receipt",
+        readonly=True,
+        ondelete="set null",
+    )
 
     zip_attachment_id = fields.Many2one("ir.attachment", string="ZIP Attachment", readonly=True, ondelete="set null")
     dphdp3_attachment_id = fields.Many2one("ir.attachment", string="DPHDP3 XML", readonly=True, ondelete="set null")
@@ -89,6 +96,27 @@ class L10nCzVatFilingHistory(models.Model):
                 "type": "binary",
                 "datas": base64.b64encode(self._zip_bytes(files)),
                 "mimetype": "application/zip",
+                "res_model": self._name,
+                "res_id": self.id,
+            }
+        )
+
+    def _create_binary_base64_attachment(self, file_name, content_base64, mimetype):
+        self.ensure_one()
+        text_payload = content_base64 or ""
+        if isinstance(text_payload, bytes):
+            text_payload = text_payload.decode("ascii", errors="ignore")
+        try:
+            binary_payload = base64.b64decode((text_payload or "").encode("ascii"), validate=True)
+        except (binascii.Error, ValueError, UnicodeEncodeError) as exc:
+            raise UserError(_("ISDS delivery receipt payload is not valid base64.")) from exc
+
+        return self.env["ir.attachment"].create(
+            {
+                "name": file_name,
+                "type": "binary",
+                "datas": base64.b64encode(binary_payload),
+                "mimetype": mimetype or "application/pdf",
                 "res_model": self._name,
                 "res_id": self.id,
             }
@@ -180,6 +208,15 @@ class L10nCzVatFilingHistory(models.Model):
                 },
             }
 
+        receipt_attachment = False
+        delivery_receipt = result.get("delivery_receipt")
+        if isinstance(delivery_receipt, dict) and delivery_receipt.get("content_base64"):
+            receipt_attachment = self._create_binary_base64_attachment(
+                delivery_receipt.get("filename") or "isds_delivery_receipt.pdf",
+                delivery_receipt.get("content_base64"),
+                delivery_receipt.get("mimetype") or "application/pdf",
+            )
+
         self.write(
             {
                 "isds_status": "submitted",
@@ -188,6 +225,7 @@ class L10nCzVatFilingHistory(models.Model):
                 "isds_message_id": result.get("message_id") or "",
                 "isds_delivery_info": result.get("delivery_info") or "",
                 "isds_last_error": False,
+                "isds_receipt_attachment_id": receipt_attachment.id if receipt_attachment else False,
                 "isds_response_json": json.dumps(
                     result.get("raw_response", {}),
                     ensure_ascii=False,
