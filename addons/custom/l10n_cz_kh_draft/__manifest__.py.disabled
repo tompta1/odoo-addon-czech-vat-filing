@@ -3,7 +3,7 @@
     "summary": "Generate Czech DPH, KH, and souhrnne hlaseni exports from Odoo data",
     "version": "19.0.2.0.0",
     "category": "Accounting/Localizations",
-    "license": "LGPL-3",
+    "license": "Other OSI approved licence",
     "author": "OpenAI Codex",
     "depends": ["account", "l10n_cz"],
     "data": [

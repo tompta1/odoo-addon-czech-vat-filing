@@ -133,6 +133,7 @@ Track upstream refs instead of vendoring Odoo Mates code:
 Release staging, tagging, and packaging:
 
 - `docs/release-publishing.md`
+- `.github/workflows/main.yml` (auto-packs and publishes GitHub Release on `v*` tags)
 
 Build addon zip artifacts:
 
@@ -155,3 +156,9 @@ Build addon zip artifacts:
 - Odoo Mates upstream refs: `docs/odoomates-upstream.md`
 - Release process: `docs/release-publishing.md`
 - Test plan notes: `docs/odoo19-cz-test-plan.md`
+
+## License
+
+- Workspace custom code in this repository is licensed under `MIT` (see `LICENSE`).
+- The MIT license includes explicit "AS IS" / no-warranty terms.
+- Third-party code (for example `addons/odoomates*`) remains under its original upstream licenses and is not relicensed by this repository.

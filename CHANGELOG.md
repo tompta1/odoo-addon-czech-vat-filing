@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-03-14 - Workspace Licensing Update
+
+- Switched workspace `LICENSE` from `LGPL-3.0-or-later` to `MIT`.
+- Updated custom addon manifests to `license: MIT`.
+- Added explicit README notes clarifying MIT no-warranty terms for custom code and upstream-license boundaries for third-party addons.
+
 ## 2026-03-14 - Release Candidate `v19.0.22.0.0`
 
 ### `l10n_cz_vat_filing` `19.0.22.0.0`

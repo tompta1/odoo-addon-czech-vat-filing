@@ -1,4 +1,6 @@
+import base64
 import calendar
+import hashlib
 import json
 import re
 import xml.etree.ElementTree as ET
@@ -122,6 +124,50 @@ class ResCompany(models.Model):
     l10n_cz_vat_fx_block_on_lookup_error = fields.Boolean(
         string="Block On VAT FX Lookup Errors",
         help="If enabled, foreign-currency invoice posting fails when VAT FX lookup for DUZP fails.",
+    )
+    l10n_cz_isds_enabled = fields.Boolean(
+        string="Enable Datova Schranka Submission",
+        help=(
+            "Enables Datova schranka submission actions from Czech VAT filing history records."
+        ),
+    )
+    l10n_cz_isds_mode = fields.Selection(
+        [
+            ("mock", "Mock (No External Delivery)"),
+            ("http_json", "HTTP JSON Bridge"),
+        ],
+        string="ISDS Submission Mode",
+        default="mock",
+        help=(
+            "Mock mode stores a deterministic local submission receipt for testing. "
+            "HTTP JSON Bridge mode posts filing payloads to an external gateway service."
+        ),
+    )
+    l10n_cz_isds_api_url = fields.Char(
+        string="ISDS Bridge API URL",
+        help="Endpoint used when ISDS Submission Mode is HTTP JSON Bridge.",
+    )
+    l10n_cz_isds_username = fields.Char(
+        string="ISDS Bridge Username",
+        groups="base.group_system",
+    )
+    l10n_cz_isds_password = fields.Char(
+        string="ISDS Bridge Password",
+        groups="base.group_system",
+    )
+    l10n_cz_isds_sender_box_id = fields.Char(
+        string="ISDS Sender Databox ID",
+        help="Optional sender databox identifier included in submission payload metadata.",
+    )
+    l10n_cz_isds_target_box_id = fields.Char(
+        string="ISDS Target Databox ID",
+        default="pndaab6",
+        help="Target databox ID for delivery routing metadata.",
+    )
+    l10n_cz_isds_timeout_seconds = fields.Integer(
+        string="ISDS Timeout (s)",
+        default=20,
+        help="HTTP timeout used for ISDS bridge requests.",
     )
 
     def _compute_l10n_cz_vat_filing_history_count(self):
@@ -616,6 +662,163 @@ class ResCompany(models.Model):
 
         if not result["violations"]:
             result["messages"].append(_("CZ VAT registry shield check passed."))
+        return result
+
+    def _l10n_cz_isds_collect_history_attachments(self, history):
+        self.ensure_one()
+        attachments = []
+        specs = [
+            ("dphdp3.xml", history.dphdp3_attachment_id),
+            ("dphkh1.xml", history.dphkh1_attachment_id),
+            ("dphshv.xml", history.dphshv_attachment_id),
+        ]
+        for file_name, attachment in specs:
+            if not attachment:
+                continue
+            datas = attachment.datas
+            if isinstance(datas, bytes):
+                datas = datas.decode("ascii")
+            attachments.append(
+                {
+                    "filename": file_name,
+                    "mimetype": attachment.mimetype or "application/xml",
+                    "content_base64": datas or "",
+                }
+            )
+        if attachments:
+            return attachments
+        if history.zip_attachment_id:
+            datas = history.zip_attachment_id.datas
+            if isinstance(datas, bytes):
+                datas = datas.decode("ascii")
+            return [
+                {
+                    "filename": history.zip_attachment_id.name or "cz_vat_filing.zip",
+                    "mimetype": history.zip_attachment_id.mimetype or "application/zip",
+                    "content_base64": datas or "",
+                }
+            ]
+        raise UserError(_("No filing attachment is available for Datova schranka submission."))
+
+    def _l10n_cz_isds_prepare_payload(self, history):
+        self.ensure_one()
+        target_box = (self.l10n_cz_isds_target_box_id or "").strip()
+        if not target_box:
+            raise UserError(_("Set ISDS Target Databox ID on company settings before submission."))
+        company_vat = self._l10n_cz_normalize_vat(self.partner_id.vat)
+        return {
+            "target_box_id": target_box,
+            "sender_box_id": (self.l10n_cz_isds_sender_box_id or "").strip(),
+            "subject": f"Czech VAT Filing {history.date_from} - {history.date_to}",
+            "company_vat": company_vat,
+            "period_from": str(history.date_from),
+            "period_to": str(history.date_to),
+            "forms": {
+                "dphdp3": bool(history.dphdp3_attachment_id),
+                "dphkh1": bool(history.dphkh1_attachment_id),
+                "dphshv": bool(history.dphshv_attachment_id),
+            },
+            "attachments": self._l10n_cz_isds_collect_history_attachments(history),
+        }
+
+    def _l10n_cz_isds_submit_mock(self, payload):
+        self.ensure_one()
+        digest_seed = "|".join(
+            [
+                payload.get("target_box_id") or "",
+                payload.get("period_from") or "",
+                payload.get("period_to") or "",
+                str(len(payload.get("attachments") or [])),
+            ]
+        )
+        message_id = "MOCK-" + hashlib.sha1(digest_seed.encode("utf-8")).hexdigest()[:16].upper()
+        return {
+            "message_id": message_id,
+            "delivery_info": _("Mock submission stored locally (no external Datova schranka delivery)."),
+            "raw_response": {"provider": "mock", "message_id": message_id},
+        }
+
+    def _l10n_cz_isds_submit_http_json(self, payload):
+        self.ensure_one()
+        url = (self.l10n_cz_isds_api_url or "").strip()
+        if not url:
+            raise UserError(_("Set ISDS Bridge API URL before using HTTP JSON Bridge mode."))
+        timeout = max(1, int(self.l10n_cz_isds_timeout_seconds or 20))
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Odoo-CZ-VAT-Filing/19",
+        }
+        username = (self.l10n_cz_isds_username or "").strip()
+        password = self.l10n_cz_isds_password or ""
+        if username:
+            token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+            headers["Authorization"] = f"Basic {token}"
+        req = request.Request(url, data=body, method="POST", headers=headers)
+        try:
+            with request.urlopen(req, timeout=timeout) as response:
+                response_body = response.read().decode("utf-8", errors="replace")
+        except (error.HTTPError, error.URLError, TimeoutError, ValueError) as exc:
+            raise UserError(_("ISDS bridge submission failed: %s") % (exc,)) from exc
+
+        try:
+            response_payload = json.loads(response_body or "{}")
+        except json.JSONDecodeError as exc:
+            raise UserError(_("ISDS bridge response is not valid JSON.")) from exc
+
+        status_raw = response_payload.get("status")
+        if status_raw is None:
+            status_raw = response_payload.get("result")
+        if status_raw is None:
+            status_raw = response_payload.get("success")
+        status_text = str(status_raw or "").strip().lower()
+        is_success = status_raw is True or status_text in {"ok", "success", "submitted", "true", "1"}
+        if not is_success:
+            detail = (
+                response_payload.get("error")
+                or response_payload.get("message")
+                or response_payload.get("detail")
+                or _("unknown error")
+            )
+            raise UserError(_("ISDS bridge rejected the submission: %s") % (detail,))
+
+        message_id = (
+            response_payload.get("message_id")
+            or response_payload.get("messageId")
+            or response_payload.get("id")
+        )
+        if not message_id:
+            raise UserError(_("ISDS bridge did not return a message identifier."))
+        return {
+            "message_id": str(message_id),
+            "delivery_info": (
+                response_payload.get("delivery_info")
+                or response_payload.get("deliveryInfo")
+                or response_payload.get("message")
+                or ""
+            ),
+            "raw_response": response_payload,
+        }
+
+    def l10n_cz_isds_submit_history(self, history):
+        self.ensure_one()
+        history.ensure_one()
+        if history.company_id != self:
+            raise UserError(_("Submission history company does not match the selected company."))
+        if not self.l10n_cz_isds_enabled:
+            raise UserError(_("Enable Datova schranka submission on company settings first."))
+
+        payload = self._l10n_cz_isds_prepare_payload(history)
+        mode = self.l10n_cz_isds_mode or "mock"
+        if mode == "mock":
+            result = self._l10n_cz_isds_submit_mock(payload)
+        elif mode == "http_json":
+            result = self._l10n_cz_isds_submit_http_json(payload)
+        else:
+            raise UserError(_("Unsupported ISDS submission mode: %s") % (mode,))
+        result["payload"] = payload
+        result["mode"] = mode
         return result
 
     def _l10n_cz_parse_float(self, value):

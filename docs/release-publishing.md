@@ -55,6 +55,11 @@ git push -u origin main
 git push origin v19.0.22.0.0
 ```
 
+Tag pushes matching `v*` trigger `.github/workflows/main.yml`, which:
+
+- runs `scripts/release_pack_addons.sh <tag>`
+- uploads zip artifacts and `SHA256SUMS.txt` to a GitHub Release for that tag
+
 ## 4. Pack Release Artifacts
 
 Create per-addon zip packages and checksums:
@@ -72,7 +77,8 @@ Artifacts are written to:
 
 ### GitHub Release
 
-Create a release from tag `v19.0.22.0.0` and attach:
+Default path: push tag `v19.0.22.0.0` and let GitHub Actions publish artifacts automatically.
+Manual fallback: create a release from tag `v19.0.22.0.0` and attach:
 
 - `l10n_cz_vat_filing-<version>.zip`
 - `l10n_cz_vat_oss_bridge-<version>.zip`

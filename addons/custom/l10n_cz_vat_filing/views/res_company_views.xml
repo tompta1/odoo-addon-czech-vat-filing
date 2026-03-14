@@ -50,6 +50,16 @@
               <field name="l10n_cz_vat_fx_cache_days" invisible="not l10n_cz_vat_fx_enforce_cnb"/>
               <field name="l10n_cz_vat_fx_block_on_lookup_error" invisible="not l10n_cz_vat_fx_enforce_cnb"/>
             </group>
+            <group string="Datova Schranka (ISDS)">
+              <field name="l10n_cz_isds_enabled"/>
+              <field name="l10n_cz_isds_mode" invisible="not l10n_cz_isds_enabled"/>
+              <field name="l10n_cz_isds_api_url" invisible="not l10n_cz_isds_enabled or l10n_cz_isds_mode != 'http_json'"/>
+              <field name="l10n_cz_isds_username" invisible="not l10n_cz_isds_enabled or l10n_cz_isds_mode != 'http_json'"/>
+              <field name="l10n_cz_isds_password" password="True" invisible="not l10n_cz_isds_enabled or l10n_cz_isds_mode != 'http_json'"/>
+              <field name="l10n_cz_isds_sender_box_id" invisible="not l10n_cz_isds_enabled"/>
+              <field name="l10n_cz_isds_target_box_id" invisible="not l10n_cz_isds_enabled"/>
+              <field name="l10n_cz_isds_timeout_seconds" invisible="not l10n_cz_isds_enabled"/>
+            </group>
           </group>
         </page>
       </xpath>

@@ -13,6 +13,8 @@
         <field name="dph_form"/>
         <field name="kh_form"/>
         <field name="sh_form"/>
+        <field name="isds_status"/>
+        <field name="isds_message_id"/>
         <field name="create_uid"/>
         <field name="create_date"/>
       </list>
@@ -51,6 +53,27 @@
               <field name="dphkh1_attachment_id" readonly="1"/>
               <field name="dphshv_attachment_id" readonly="1"/>
               <field name="debug_attachment_id" readonly="1"/>
+            </group>
+          </group>
+          <group string="Datova Schranka (ISDS)">
+            <group>
+              <button
+                name="action_submit_isds"
+                type="object"
+                string="Submit via Datova Schranka"
+                class="oe_highlight"
+              />
+              <field name="isds_status" readonly="1"/>
+              <field name="isds_submitted_at" readonly="1"/>
+              <field name="isds_target_box_id" readonly="1"/>
+              <field name="isds_message_id" readonly="1"/>
+            </group>
+            <group>
+              <field name="isds_delivery_info" readonly="1"/>
+              <field name="isds_last_error" readonly="1"/>
+            </group>
+            <group>
+              <field name="isds_response_json" readonly="1" nolabel="1"/>
             </group>
           </group>
           <group string="Warnings">

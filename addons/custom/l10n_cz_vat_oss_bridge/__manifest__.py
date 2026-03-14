@@ -3,7 +3,7 @@
     "summary": "Auto-classify OSS/IOSS moves for Czech VAT filing exports",
     "version": "19.0.2.0.0",
     "category": "Accounting/Localizations",
-    "license": "LGPL-3",
+    "license": "Other OSI approved licence",
     "author": "OpenAI Codex",
     "depends": ["l10n_cz_vat_filing", "l10n_eu_oss"],
     "data": [

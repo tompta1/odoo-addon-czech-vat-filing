@@ -27,6 +27,22 @@ class L10nCzVatFilingHistory(models.Model):
     sh_form = fields.Char(string="SH Form")
     options_json = fields.Text(string="Options JSON", readonly=True)
     warning_messages = fields.Text(string="Warnings", readonly=True)
+    isds_status = fields.Selection(
+        [
+            ("not_sent", "Not Sent"),
+            ("submitted", "Submitted"),
+            ("error", "Error"),
+        ],
+        string="Datova Schranka Status",
+        default="not_sent",
+        readonly=True,
+    )
+    isds_submitted_at = fields.Datetime(string="ISDS Submitted At", readonly=True)
+    isds_target_box_id = fields.Char(string="ISDS Target Databox", readonly=True)
+    isds_message_id = fields.Char(string="ISDS Message ID", readonly=True)
+    isds_delivery_info = fields.Text(string="ISDS Delivery Info", readonly=True)
+    isds_last_error = fields.Text(string="ISDS Last Error", readonly=True)
+    isds_response_json = fields.Text(string="ISDS Response JSON", readonly=True)
 
     zip_attachment_id = fields.Many2one("ir.attachment", string="ZIP Attachment", readonly=True, ondelete="set null")
     dphdp3_attachment_id = fields.Many2one("ir.attachment", string="DPHDP3 XML", readonly=True, ondelete="set null")
@@ -138,3 +154,55 @@ class L10nCzVatFilingHistory(models.Model):
         attachment_ids["zip_attachment_id"] = record._create_zip_attachment(archive_name, files).id
         record.write(attachment_ids)
         return record
+
+    def action_submit_isds(self):
+        self.ensure_one()
+        company = self.company_id
+        try:
+            result = company.l10n_cz_isds_submit_history(self)
+        except UserError as exc:
+            message = getattr(exc, "name", "") or str(exc)
+            self.write(
+                {
+                    "isds_status": "error",
+                    "isds_submitted_at": fields.Datetime.now(),
+                    "isds_last_error": message,
+                }
+            )
+            return {
+                "type": "ir.actions.client",
+                "tag": "display_notification",
+                "params": {
+                    "type": "danger",
+                    "title": _("Datova Schranka"),
+                    "message": message,
+                    "sticky": True,
+                },
+            }
+
+        self.write(
+            {
+                "isds_status": "submitted",
+                "isds_submitted_at": fields.Datetime.now(),
+                "isds_target_box_id": result.get("payload", {}).get("target_box_id") or "",
+                "isds_message_id": result.get("message_id") or "",
+                "isds_delivery_info": result.get("delivery_info") or "",
+                "isds_last_error": False,
+                "isds_response_json": json.dumps(
+                    result.get("raw_response", {}),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    indent=2,
+                ),
+            }
+        )
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "type": "success",
+                "title": _("Datova Schranka"),
+                "message": _("Submission queued with message ID %s.") % (self.isds_message_id,),
+                "sticky": False,
+            },
+        }
