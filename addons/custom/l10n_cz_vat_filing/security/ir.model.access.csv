@@ -1,4 +1,5 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_l10n_cz_vat_filing_export_wizard_account_user,l10n_cz.vat.filing.export.wizard account user,model_l10n_cz_vat_filing_export_wizard,account.group_account_user,1,1,1,1
 access_l10n_cz_vat_filing_history_account_user,l10n_cz.vat.filing.history account user,model_l10n_cz_vat_filing_history,account.group_account_user,1,0,1,0
+access_l10n_cz_vat_fx_rate_account_user,l10n_cz.vat.fx.rate account user,model_l10n_cz_vat_fx_rate,account.group_account_user,1,0,1,0
 access_l10n_cz_vat_registry_check_account_user,l10n_cz.vat.registry.check account user,model_l10n_cz_vat_registry_check,account.group_account_user,1,0,1,0

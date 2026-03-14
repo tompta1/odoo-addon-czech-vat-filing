@@ -38,13 +38,13 @@ Stage and commit:
 
 ```bash
 git add .
-git commit -m "release: v19.0.21.0.0"
+git commit -m "release: v19.0.22.0.0"
 ```
 
 Create an annotated tag:
 
 ```bash
-git tag -a v19.0.21.0.0 -m "Czech VAT filing release v19.0.21.0.0"
+git tag -a v19.0.22.0.0 -m "Czech VAT filing release v19.0.22.0.0"
 ```
 
 Push once remote is configured:
@@ -52,7 +52,7 @@ Push once remote is configured:
 ```bash
 git remote add origin <your-github-repo-url>
 git push -u origin main
-git push origin v19.0.21.0.0
+git push origin v19.0.22.0.0
 ```
 
 ## 4. Pack Release Artifacts
@@ -60,19 +60,19 @@ git push origin v19.0.21.0.0
 Create per-addon zip packages and checksums:
 
 ```bash
-./scripts/release_pack_addons.sh v19.0.21.0.0
+./scripts/release_pack_addons.sh v19.0.22.0.0
 ```
 
 Artifacts are written to:
 
-- `dist/v19.0.21.0.0/*.zip`
-- `dist/v19.0.21.0.0/SHA256SUMS.txt`
+- `dist/v19.0.22.0.0/*.zip`
+- `dist/v19.0.22.0.0/SHA256SUMS.txt`
 
 ## 5. Publish Targets
 
 ### GitHub Release
 
-Create a release from tag `v19.0.21.0.0` and attach:
+Create a release from tag `v19.0.22.0.0` and attach:
 
 - `l10n_cz_vat_filing-<version>.zip`
 - `l10n_cz_vat_oss_bridge-<version>.zip`

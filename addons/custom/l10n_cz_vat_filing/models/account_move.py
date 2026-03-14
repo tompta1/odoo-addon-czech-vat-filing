@@ -129,6 +129,36 @@ class AccountMove(models.Model):
         copy=False,
         help="Latest VAT-registry shield result captured for this vendor document.",
     )
+    l10n_cz_vat_fx_manual_rate = fields.Float(
+        string="CZ VAT FX Manual Rate",
+        digits=(16, 8),
+        help="Optional manual DUZP VAT FX rate to CZK for this foreign-currency document.",
+    )
+    l10n_cz_vat_fx_rate = fields.Float(
+        string="CZ VAT FX Applied Rate",
+        digits=(16, 8),
+        readonly=True,
+        copy=False,
+        help="Resolved DUZP VAT FX rate to CZK used by Czech VAT export decoupling.",
+    )
+    l10n_cz_vat_fx_rate_source = fields.Selection(
+        [("manual", "Manual"), ("cnb", "CNB/API")],
+        string="CZ VAT FX Source",
+        readonly=True,
+        copy=False,
+    )
+    l10n_cz_vat_fx_rate_record_id = fields.Many2one(
+        "l10n_cz.vat.fx.rate",
+        string="CZ VAT FX Rate Record",
+        readonly=True,
+        copy=False,
+    )
+    l10n_cz_vat_fx_note = fields.Text(
+        string="CZ VAT FX Note",
+        readonly=True,
+        copy=False,
+        help="Latest VAT FX resolution note for Czech VAT export purposes.",
+    )
 
     def l10n_cz_kh_draft_payload(self):
         return self.env["l10n_cz.kh.draft.export"].build_payload(self)
@@ -139,6 +169,46 @@ class AccountMove(models.Model):
     def _l10n_cz_registry_bank_account_number(self):
         self.ensure_one()
         return (self.partner_bank_id.acc_number or "").strip()
+
+    def _l10n_cz_apply_vat_fx_rate(self):
+        for move in self:
+            if move.move_type not in {"out_invoice", "out_refund", "in_invoice", "in_refund"}:
+                continue
+            company = move.company_id
+            if not company._l10n_cz_vat_fx_move_enabled(move):
+                move.write(
+                    {
+                        "l10n_cz_vat_fx_rate": 0.0,
+                        "l10n_cz_vat_fx_rate_source": False,
+                        "l10n_cz_vat_fx_rate_record_id": False,
+                        "l10n_cz_vat_fx_note": "",
+                    }
+                )
+                continue
+
+            if move.l10n_cz_vat_fx_manual_rate and move.l10n_cz_vat_fx_manual_rate > 0:
+                move.write(
+                    {
+                        "l10n_cz_vat_fx_rate": move.l10n_cz_vat_fx_manual_rate,
+                        "l10n_cz_vat_fx_rate_source": "manual",
+                        "l10n_cz_vat_fx_rate_record_id": False,
+                        "l10n_cz_vat_fx_note": "Using manual CZ VAT FX rate override.",
+                    }
+                )
+                continue
+
+            resolved_rate, rate_record = company.l10n_cz_vat_fx_rate_for_move(move)
+            values = {
+                "l10n_cz_vat_fx_rate_record_id": rate_record.id or False,
+                "l10n_cz_vat_fx_rate_source": "cnb",
+            }
+            if resolved_rate:
+                values["l10n_cz_vat_fx_rate"] = resolved_rate
+                values["l10n_cz_vat_fx_note"] = "Using DUZP VAT FX rate from CZ VAT FX API cache."
+            else:
+                values["l10n_cz_vat_fx_rate"] = 0.0
+                values["l10n_cz_vat_fx_note"] = rate_record.error_message or "VAT FX lookup failed."
+            move.write(values)
 
     def _l10n_cz_check_registry_shield(self):
         for move in self:
@@ -163,5 +233,6 @@ class AccountMove(models.Model):
                 raise UserError("\n".join(evaluation["violations"]))
 
     def action_post(self):
+        self._l10n_cz_apply_vat_fx_rate()
         self._l10n_cz_check_registry_shield()
         return super().action_post()

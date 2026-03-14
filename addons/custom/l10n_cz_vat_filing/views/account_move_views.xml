@@ -20,6 +20,10 @@
               <field name="l10n_cz_import_correction_reason" invisible="l10n_cz_vat_regime != 'third_country_import'"/>
               <field name="l10n_cz_kh_document_reference"/>
               <field name="l10n_cz_dph_tax_date"/>
+              <field name="l10n_cz_vat_fx_manual_rate"/>
+              <field name="l10n_cz_vat_fx_rate" readonly="1"/>
+              <field name="l10n_cz_vat_fx_rate_source" readonly="1"/>
+              <field name="l10n_cz_vat_fx_rate_record_id" readonly="1"/>
               <field name="l10n_cz_kh_tax_point_date"/>
               <field name="l10n_cz_kh_deduction_date"/>
               <field name="l10n_cz_dph_line_45_full_deduction"/>
@@ -33,6 +37,7 @@
               <field name="l10n_cz_kh_proportional_deduction"/>
               <field name="l10n_cz_dph_line_48_reduced_deduction"/>
               <field name="l10n_cz_dph_line_60_adjustment"/>
+              <field name="l10n_cz_vat_fx_note" readonly="1" invisible="not l10n_cz_vat_fx_note"/>
               <field name="l10n_cz_vat_registry_check_id" readonly="1"/>
               <field name="l10n_cz_vat_registry_note" readonly="1" invisible="not l10n_cz_vat_registry_note"/>
             </group>

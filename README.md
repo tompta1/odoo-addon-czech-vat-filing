@@ -102,7 +102,7 @@ Release staging, tagging, and packaging steps are documented in
 Build addon zip artifacts for GitHub Releases / Odoo Apps:
 
 ```bash
-./scripts/release_pack_addons.sh v19.0.21.0.0
+./scripts/release_pack_addons.sh v19.0.22.0.0
 ```
 
 ## Odoo Mates Refs

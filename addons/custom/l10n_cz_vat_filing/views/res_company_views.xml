@@ -41,6 +41,15 @@
               <field name="l10n_cz_vat_registry_block_unpublished_bank" invisible="not l10n_cz_vat_registry_enabled"/>
               <field name="l10n_cz_vat_registry_block_on_lookup_error" invisible="not l10n_cz_vat_registry_enabled"/>
             </group>
+            <group string="VAT FX (CNB)">
+              <field name="l10n_cz_vat_fx_enforce_cnb"/>
+              <field name="l10n_cz_vat_fx_api_url" invisible="not l10n_cz_vat_fx_enforce_cnb"/>
+              <field name="l10n_cz_vat_fx_currency_param" invisible="not l10n_cz_vat_fx_enforce_cnb"/>
+              <field name="l10n_cz_vat_fx_date_param" invisible="not l10n_cz_vat_fx_enforce_cnb"/>
+              <field name="l10n_cz_vat_fx_timeout_seconds" invisible="not l10n_cz_vat_fx_enforce_cnb"/>
+              <field name="l10n_cz_vat_fx_cache_days" invisible="not l10n_cz_vat_fx_enforce_cnb"/>
+              <field name="l10n_cz_vat_fx_block_on_lookup_error" invisible="not l10n_cz_vat_fx_enforce_cnb"/>
+            </group>
           </group>
         </page>
       </xpath>

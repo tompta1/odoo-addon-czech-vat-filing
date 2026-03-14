@@ -339,6 +339,9 @@ class L10nCzVatFilingExport(models.AbstractModel):
         target_currency = self._czk_currency(company)
         if not source_currency or source_currency == target_currency:
             return amount
+        vat_fx_rate = self._move_vat_fx_rate(move)
+        if vat_fx_rate:
+            return self._decimal(amount * vat_fx_rate)
         converted = source_currency._convert(
             float(amount),
             target_currency,
@@ -347,6 +350,23 @@ class L10nCzVatFilingExport(models.AbstractModel):
             round=False,
         )
         return self._decimal(converted)
+
+    def _move_vat_fx_rate(self, move):
+        company = move.company_id
+        if not company.l10n_cz_vat_fx_enforce_cnb:
+            return None
+        source_currency = move.currency_id or company.currency_id
+        target_currency = self._czk_currency(company)
+        if not source_currency or source_currency == target_currency:
+            return None
+        if move.l10n_cz_vat_fx_manual_rate and move.l10n_cz_vat_fx_manual_rate > 0:
+            return self._decimal(move.l10n_cz_vat_fx_manual_rate)
+        if move.l10n_cz_vat_fx_rate and move.l10n_cz_vat_fx_rate > 0:
+            return self._decimal(move.l10n_cz_vat_fx_rate)
+        resolved_rate, _rate_record = company.l10n_cz_vat_fx_rate_for_move(move)
+        if resolved_rate:
+            return self._decimal(resolved_rate)
+        return None
 
     def _refund_origin_requires_detail(self, move):
         if move.move_type not in {"out_refund", "in_refund"}:
@@ -528,7 +548,20 @@ class L10nCzVatFilingExport(models.AbstractModel):
         )
 
     def _line_amount_from_balance(self, line):
+        vat_fx_amount = self._line_amount_from_vat_fx(line)
+        if vat_fx_amount is not None:
+            return vat_fx_amount
         return self._decimal(abs(line.balance) * self._move_sign(line.move_id))
+
+    def _line_amount_from_vat_fx(self, line):
+        move = line.move_id
+        vat_fx_rate = self._move_vat_fx_rate(move)
+        if not vat_fx_rate:
+            return None
+        if not line.amount_currency:
+            return None
+        amount_currency = self._decimal(abs(line.amount_currency))
+        return self._decimal(amount_currency * self._move_sign(move) * vat_fx_rate)
 
     def _tax_tag_names(self, moves):
         names = set()

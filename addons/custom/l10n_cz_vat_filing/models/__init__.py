@@ -5,4 +5,5 @@ from . import kh_export
 from . import res_company
 from . import vat_filing_history
 from . import vat_filing_export
+from . import vat_fx_rate
 from . import vat_registry_check

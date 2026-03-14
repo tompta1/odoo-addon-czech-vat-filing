@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-03-14 - Release Candidate `v19.0.22.0.0`
+
+### `l10n_cz_vat_filing` `19.0.22.0.0`
+- Added Czech VAT FX decoupling settings on company for DUZP-based foreign-currency conversion.
+- Added cached DUZP FX-rate model (`l10n_cz.vat.fx.rate`) and a daily cron refresher.
+- Added move-level VAT FX audit fields (`manual rate`, `applied rate`, `source`, `rate record`, `note`).
+- Added posting-time VAT FX resolution before Czech VAT export logic.
+- Updated VAT export amount computation to use DUZP VAT FX conversion for foreign-currency lines instead of accounting balances when enabled.
+- Added automated tests for CBN/API-rate decoupling, manual rate override, and blocking lookup-error policy.
+
 ## 2026-03-14 - Release Candidate `v19.0.21.0.0`
 
 ### `l10n_cz_vat_filing` `19.0.21.0.0`

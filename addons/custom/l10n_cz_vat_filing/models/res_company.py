@@ -5,6 +5,12 @@ from datetime import timedelta
 from urllib import error, parse, request
 
 from odoo import _, fields, models
+from odoo.exceptions import UserError
+
+CNB_DAILY_RATE_URL = (
+    "https://www.cnb.cz/cs/financni-trhy/devizovy-trh/kurzy-devizoveho-trhu/"
+    "kurzy-devizoveho-trhu/denni_kurz.txt"
+)
 
 
 class ResCompany(models.Model):
@@ -75,6 +81,45 @@ class ResCompany(models.Model):
     l10n_cz_vat_registry_block_on_lookup_error = fields.Boolean(
         string="Block On VAT Registry Lookup Errors",
         help="If enabled, temporary registry/API errors block posting as a safety policy.",
+    )
+    l10n_cz_vat_fx_enforce_cnb = fields.Boolean(
+        string="Enable CZ VAT FX Decoupling",
+        help=(
+            "If enabled, Czech VAT export calculations for foreign-currency documents use CZ VAT FX rates "
+            "resolved for DUZP instead of accounting conversion rates."
+        ),
+    )
+    l10n_cz_vat_fx_api_url = fields.Char(
+        string="CZ VAT FX API URL",
+        default=CNB_DAILY_RATE_URL,
+        help=(
+            "HTTP endpoint used for VAT FX rates (default: official CNB daily rate feed). "
+            "Use `{date}` and `{currency}` placeholders or set query-parameter names below."
+        ),
+    )
+    l10n_cz_vat_fx_currency_param = fields.Char(
+        string="CZ VAT FX Currency Parameter",
+        default="currency",
+        help="Query-parameter name for currency code when the FX API URL does not include `{currency}`.",
+    )
+    l10n_cz_vat_fx_date_param = fields.Char(
+        string="CZ VAT FX Date Parameter",
+        default="date",
+        help="Query-parameter name for tax date when the FX API URL does not include `{date}`.",
+    )
+    l10n_cz_vat_fx_timeout_seconds = fields.Integer(
+        string="CZ VAT FX Timeout (s)",
+        default=10,
+        help="HTTP timeout for VAT FX lookups.",
+    )
+    l10n_cz_vat_fx_cache_days = fields.Integer(
+        string="CZ VAT FX Cache (days)",
+        default=365,
+        help="How long successful CZ VAT FX lookups are cached for DUZP-based reuse.",
+    )
+    l10n_cz_vat_fx_block_on_lookup_error = fields.Boolean(
+        string="Block On VAT FX Lookup Errors",
+        help="If enabled, foreign-currency invoice posting fails when VAT FX lookup for DUZP fails.",
     )
 
     def _compute_l10n_cz_vat_filing_history_count(self):
@@ -361,6 +406,298 @@ class ResCompany(models.Model):
         if not result["violations"]:
             result["messages"].append(_("CZ VAT registry shield check passed."))
         return result
+
+    def _l10n_cz_parse_float(self, value):
+        if value in (None, "", False):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        text = str(value).strip().replace(" ", "").replace(",", ".")
+        try:
+            return float(text)
+        except ValueError:
+            return None
+
+    def _l10n_cz_vat_fx_tax_date(self, move):
+        return move.l10n_cz_dph_tax_date or move.invoice_date or move.date or fields.Date.today()
+
+    def _l10n_cz_vat_fx_move_enabled(self, move):
+        self.ensure_one()
+        if not self.l10n_cz_vat_fx_enforce_cnb:
+            return False
+        company_currency = self.currency_id
+        if not company_currency or company_currency.name != "CZK":
+            return False
+        move_currency = move.currency_id or company_currency
+        return bool(move_currency and move_currency != company_currency)
+
+    def _l10n_cz_extract_rate_to_czk(self, payload, currency_code):
+        direct_rate = self._l10n_cz_parse_float(
+            self._l10n_cz_payload_first_value(payload, ["rate_to_czk", "rateToCzk"])
+        )
+        if direct_rate and direct_rate > 0:
+            direct_amount = self._l10n_cz_parse_float(
+                self._l10n_cz_payload_first_value(payload, ["amount", "mnozstvi"])
+            ) or 1.0
+            if direct_amount > 0:
+                return direct_rate / direct_amount
+            return direct_rate
+
+        for mapping in self._l10n_cz_iter_payload_dicts(payload):
+            code = (
+                mapping.get("currency")
+                or mapping.get("code")
+                or mapping.get("mena")
+                or mapping.get("kod")
+            )
+            if not (isinstance(code, str) and code.upper() == currency_code):
+                continue
+            rate = self._l10n_cz_parse_float(
+                mapping.get("rate_to_czk")
+                or mapping.get("rate")
+                or mapping.get("kurz")
+                or mapping.get("value")
+            )
+            if not rate or rate <= 0:
+                continue
+            amount = self._l10n_cz_parse_float(mapping.get("amount") or mapping.get("mnozstvi")) or 1.0
+            if amount > 0:
+                return rate / amount
+            return rate
+
+        for mapping in self._l10n_cz_iter_payload_dicts(payload):
+            if currency_code not in mapping:
+                continue
+            candidate = mapping[currency_code]
+            if isinstance(candidate, dict):
+                rate = self._l10n_cz_parse_float(
+                    candidate.get("rate_to_czk")
+                    or candidate.get("rate")
+                    or candidate.get("kurz")
+                    or candidate.get("value")
+                )
+                if not rate or rate <= 0:
+                    continue
+                amount = self._l10n_cz_parse_float(candidate.get("amount") or candidate.get("mnozstvi")) or 1.0
+                if amount > 0:
+                    return rate / amount
+                return rate
+            rate = self._l10n_cz_parse_float(candidate)
+            if rate and rate > 0:
+                return rate
+        return None
+
+    def _l10n_cz_vat_fx_is_cnb_url(self, base_url):
+        parsed = parse.urlsplit(base_url or "")
+        host = (parsed.netloc or "").lower()
+        path = (parsed.path or "").lower()
+        return host.endswith("cnb.cz") and "denni_kurz.txt" in path
+
+    def _l10n_cz_vat_fx_extract_rate_from_cnb_text(self, body, currency_code):
+        lines = [line.strip() for line in (body or "").splitlines() if line.strip()]
+        if len(lines) < 3:
+            return None, {"provider": "cnb_txt", "raw": body or ""}
+        for line in lines[2:]:
+            parts = [part.strip() for part in line.split("|")]
+            if len(parts) != 5:
+                continue
+            if parts[3].upper() != currency_code:
+                continue
+            amount = self._l10n_cz_parse_float(parts[2])
+            rate = self._l10n_cz_parse_float(parts[4])
+            if not amount or amount <= 0 or not rate or rate <= 0:
+                continue
+            return (rate / amount), {"provider": "cnb_txt", "header": lines[0], "line": line}
+        return None, {"provider": "cnb_txt", "header": lines[0]}
+
+    def _l10n_cz_vat_fx_build_url(self, currency, tax_date):
+        self.ensure_one()
+        base_url = (self.l10n_cz_vat_fx_api_url or "").strip()
+        if not base_url:
+            return ""
+        is_cnb_url = self._l10n_cz_vat_fx_is_cnb_url(base_url)
+        currency_code = (currency.name or "").upper()
+        tax_date_value = fields.Date.to_date(tax_date)
+        tax_date_text = tax_date_value.strftime("%d.%m.%Y") if is_cnb_url else tax_date_value.isoformat()
+        if "{currency}" in base_url or "{date}" in base_url:
+            return (
+                base_url.replace("{currency}", parse.quote(currency_code, safe=""))
+                .replace("{date}", parse.quote(tax_date_text, safe=""))
+            )
+        parsed = parse.urlsplit(base_url)
+        query = dict(parse.parse_qsl(parsed.query, keep_blank_values=True))
+        if is_cnb_url:
+            query["date"] = tax_date_text
+        else:
+            currency_param = (self.l10n_cz_vat_fx_currency_param or "").strip()
+            date_param = (self.l10n_cz_vat_fx_date_param or "date").strip() or "date"
+            if currency_param:
+                query[currency_param] = currency_code
+            query[date_param] = tax_date_text
+        return parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parse.urlencode(query), parsed.fragment))
+
+    def _l10n_cz_vat_fx_fetch_rate(self, currency, tax_date):
+        self.ensure_one()
+        url = self._l10n_cz_vat_fx_build_url(currency, tax_date)
+        if not url:
+            return {
+                "status": "error",
+                "error_message": _("CZ VAT FX API URL is not configured."),
+                "source_url": "",
+                "payload": {},
+                "rate_to_czk": 0.0,
+            }
+        timeout = max(1, int(self.l10n_cz_vat_fx_timeout_seconds or 10))
+        req = request.Request(url, headers={"Accept": "*/*", "User-Agent": "Odoo-CZ-VAT-Filing/19"})
+        try:
+            with request.urlopen(req, timeout=timeout) as response:
+                body = response.read().decode("utf-8", errors="replace")
+        except (error.HTTPError, error.URLError, TimeoutError, ValueError) as exc:
+            return {
+                "status": "error",
+                "error_message": str(exc),
+                "source_url": url,
+                "payload": {},
+                "rate_to_czk": 0.0,
+            }
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            rate, text_payload = self._l10n_cz_vat_fx_extract_rate_from_cnb_text(body, (currency.name or "").upper())
+            if rate and rate > 0:
+                return {
+                    "status": "ok",
+                    "error_message": "",
+                    "source_url": url,
+                    "payload": text_payload,
+                    "rate_to_czk": rate,
+                }
+            return {
+                "status": "error",
+                "error_message": _("CZ VAT FX API response is neither valid JSON nor parseable CNB text."),
+                "source_url": url,
+                "payload": text_payload,
+                "rate_to_czk": 0.0,
+            }
+
+        rate = self._l10n_cz_extract_rate_to_czk(payload, (currency.name or "").upper())
+        if not rate or rate <= 0:
+            return {
+                "status": "error",
+                "error_message": _("CZ VAT FX API did not provide a positive rate for %s.") % (currency.name,),
+                "source_url": url,
+                "payload": payload,
+                "rate_to_czk": 0.0,
+            }
+        return {
+            "status": "ok",
+            "error_message": "",
+            "source_url": url,
+            "payload": payload,
+            "rate_to_czk": rate,
+        }
+
+    def _l10n_cz_vat_fx_cached_rate(self, currency, tax_date):
+        self.ensure_one()
+        rate_record = self.env["l10n_cz.vat.fx.rate"].search(
+            [
+                ("company_id", "=", self.id),
+                ("currency_id", "=", currency.id),
+                ("tax_date", "=", tax_date),
+            ],
+            limit=1,
+        )
+        if not rate_record or rate_record.status != "ok":
+            return self.env["l10n_cz.vat.fx.rate"]
+        cache_days = max(0, int(self.l10n_cz_vat_fx_cache_days or 0))
+        if not cache_days:
+            return self.env["l10n_cz.vat.fx.rate"]
+        threshold = fields.Datetime.now() - timedelta(days=cache_days)
+        return rate_record if rate_record.checked_at and rate_record.checked_at >= threshold else self.env["l10n_cz.vat.fx.rate"]
+
+    def _l10n_cz_vat_fx_get_rate_record(self, currency, tax_date, force_refresh=False):
+        self.ensure_one()
+        tax_date = fields.Date.to_date(tax_date)
+        rate_record = self.env["l10n_cz.vat.fx.rate"].search(
+            [
+                ("company_id", "=", self.id),
+                ("currency_id", "=", currency.id),
+                ("tax_date", "=", tax_date),
+            ],
+            limit=1,
+        )
+        if not force_refresh:
+            cached = self._l10n_cz_vat_fx_cached_rate(currency, tax_date)
+            if cached:
+                return cached
+
+        fetched = self._l10n_cz_vat_fx_fetch_rate(currency, tax_date)
+        values = {
+            "company_id": self.id,
+            "currency_id": currency.id,
+            "tax_date": tax_date,
+            "checked_at": fields.Datetime.now(),
+            "status": fetched["status"],
+            "rate_to_czk": fetched["rate_to_czk"],
+            "source_url": fetched["source_url"],
+            "response_payload": fetched["payload"],
+            "error_message": fetched["error_message"],
+        }
+        if rate_record:
+            rate_record.sudo().write(values)
+            return rate_record
+        return self.env["l10n_cz.vat.fx.rate"].sudo().create(values)
+
+    def l10n_cz_vat_fx_rate_for_move(self, move, force_refresh=False):
+        self.ensure_one()
+        if not self._l10n_cz_vat_fx_move_enabled(move):
+            return None, self.env["l10n_cz.vat.fx.rate"]
+        currency = move.currency_id or self.currency_id
+        tax_date = self._l10n_cz_vat_fx_tax_date(move)
+        rate_record = self._l10n_cz_vat_fx_get_rate_record(currency, tax_date, force_refresh=force_refresh)
+        if rate_record.status == "ok" and rate_record.rate_to_czk > 0:
+            return rate_record.rate_to_czk, rate_record
+        message = _(
+            "CZ VAT FX lookup failed for %(currency)s on %(tax_date)s: %(error)s"
+        ) % {
+            "currency": currency.name,
+            "tax_date": fields.Date.to_date(tax_date).isoformat(),
+            "error": rate_record.error_message or _("Unknown API error"),
+        }
+        if self.l10n_cz_vat_fx_block_on_lookup_error:
+            raise UserError(message)
+        return None, rate_record
+
+    def cron_l10n_cz_refresh_vat_fx_rates(self):
+        companies = self.search(
+            [
+                ("l10n_cz_vat_fx_enforce_cnb", "=", True),
+                ("l10n_cz_vat_fx_api_url", "!=", False),
+            ]
+        )
+        if not companies:
+            return True
+        today = fields.Date.today()
+        recent_since = today - timedelta(days=90)
+        Move = self.env["account.move"]
+        for company in companies:
+            recent_moves = Move.search(
+                [
+                    ("company_id", "=", company.id),
+                    ("state", "=", "posted"),
+                    ("move_type", "in", ["out_invoice", "out_refund", "in_invoice", "in_refund"]),
+                    ("date", ">=", recent_since),
+                ]
+            )
+            currencies = recent_moves.mapped("currency_id")
+            for currency in currencies:
+                if not currency or currency == company.currency_id:
+                    continue
+                try:
+                    company._l10n_cz_vat_fx_get_rate_record(currency, today, force_refresh=False)
+                except Exception:
+                    continue
+        return True
 
     def l10n_cz_vat_filing_exports(self, date_from, date_to, options=None):
         self.ensure_one()

@@ -24,6 +24,7 @@ The supported XML scope is the baseline microSME path already classified by `l10
 - automatic domestic `KH` threshold routing (`10.000 CZK`) for `A4/A5` and `B2/B3`, evaluated in `CZK` (including foreign-currency invoices)
 - domestic B2B refunds under `10.000 CZK` are detail-routed to `A4/B2` only when linked to an over-threshold origin invoice
 - optional Czech VAT-registry shield checks for supplier reliability and published bank-account matching on vendor bills and supplier payments
+- optional Czech VAT FX decoupling that resolves DUZP-based FX rates to CZK (with cache and manual override) for foreign-currency VAT export amounts
 - asset-acquisition information row `VAT 47`
 - coefficient-base rows `VAT 50` and `VAT 51`
 - tax-refund row `VAT 61`
@@ -116,6 +117,11 @@ Additional filing controls exposed on `account.move`:
 - `CZ DPH Line 60 Adjustment`
 - `CZ VAT Registry Check`
 - `CZ VAT Registry Note`
+- `CZ VAT FX Manual Rate`
+- `CZ VAT FX Applied Rate`
+- `CZ VAT FX Source`
+- `CZ VAT FX Rate Record`
+- `CZ VAT FX Note`
 
 Additional filing controls exposed on `res.company`:
 
@@ -131,6 +137,14 @@ Additional filing controls exposed on `res.company`:
 - `Block Unreliable VAT Payers`
 - `Block Unpublished Supplier Bank Accounts`
 - `Block On VAT Registry Lookup Errors`
+- `Enable CZ VAT FX Decoupling`
+- `CZ VAT FX API URL`
+- `CZ VAT FX Currency Parameter`
+- `CZ VAT FX Date Parameter`
+- `CZ VAT FX Timeout (s)`
+- `CZ VAT FX Cache (days)`
+- `Block On VAT FX Lookup Errors`
+- default FX endpoint is prefilled to official ČNB `denni_kurz.txt`, parsed in native TXT format with `date=DD.MM.YYYY`
 
 Built-in Odoo UI export wizard:
 
@@ -185,6 +199,7 @@ The current import / dropshipping hardening is:
 - temporary RPDP subject codes `11` and `14` now hard-fail below a `100.000 CZK` taxable base
 - moves marked with filing regime `OSS` or `IOSS` are excluded from the standard Czech `DPHDP3`, `DPHKH1`, and `DPHSHV` exports
 - moves marked with filing regime `OSS` or `IOSS` must use non-Czech taxes; if they still carry Czech filing tags, the export now fails validation
+- DUZP-based Czech VAT FX rates can be refreshed daily by cron (`CZ VAT FX Rate Refresh`) and are cached in `l10n_cz.vat.fx.rate` (official ČNB TXT feed + JSON fallback)
 
 That `OSS` / `IOSS` support is currently a guarded exclusion path, not a full Odoo `l10n_eu_oss` integration.
 
