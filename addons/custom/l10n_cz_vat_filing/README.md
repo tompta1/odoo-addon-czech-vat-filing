@@ -150,8 +150,8 @@ Additional filing controls exposed on `res.company`:
 - `Block On VAT FX Lookup Errors`
 - default FX endpoint is prefilled to official ČNB `denni_kurz.txt`, parsed in native TXT format with `date=DD.MM.YYYY`
 - `Enable Datova Schranka Submission`
-- `ISDS Submission Mode` (`mock` or `http_json`)
-- `ISDS Bridge API URL`, `ISDS Bridge Username`, `ISDS Bridge Password`
+- `ISDS Submission Mode` (`mock`, `http_json`, or `soap_owner_info`)
+- `ISDS Endpoint URL`, `ISDS Username`, `ISDS Password`
 - `ISDS Sender Databox ID`, `ISDS Target Databox ID`, `ISDS Timeout (s)`
 
 ISDS bridge response contract (HTTP JSON mode):
@@ -160,6 +160,9 @@ ISDS bridge response contract (HTTP JSON mode):
 - message identifier: `message_id` (fallback `messageId` or `id`)
 - optional delivery receipt fields: `delivery_receipt_base64` (+ optional filename/mimetype keys)
 - when delivery receipt base64 is present and valid, it is persisted as `ISDS Delivery Receipt` attachment in filing history
+- SOAP credential-check mode calls `GetOwnerInfoFromLogin` on configured endpoint
+  (for test env typically `https://ws1.czebox.cz/DS/DsManage`) using HTTP Basic Auth
+- `soap_owner_info` mode validates credentials only; it does not submit filing XML payloads
 
 Built-in Odoo UI export wizard:
 

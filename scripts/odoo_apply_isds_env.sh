@@ -47,6 +47,14 @@ mapping = {
     'l10n_cz_isds_timeout_seconds': ('L10N_CZ_ISDS_TIMEOUT_SECONDS', 'int'),
 }
 
+mode_aliases = {
+    'soap': 'soap_owner_info',
+    'soap_test': 'soap_owner_info',
+    'soap_owner': 'soap_owner_info',
+    'bridge': 'http_json',
+    'json': 'http_json',
+}
+
 vals = {}
 for field_name, (env_name, value_type) in mapping.items():
     raw = os.getenv(env_name)
@@ -57,7 +65,10 @@ for field_name, (env_name, value_type) in mapping.items():
     elif value_type == 'int':
         vals[field_name] = parse_int(raw, company[field_name] or 20)
     else:
-        vals[field_name] = str(raw).strip()
+        text = str(raw).strip()
+        if field_name == 'l10n_cz_isds_mode':
+            text = mode_aliases.get(text.lower(), text)
+        vals[field_name] = text
 
 if not vals:
     print('No L10N_CZ_ISDS_* env values found in container. Nothing to apply.')

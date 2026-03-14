@@ -136,24 +136,29 @@ class ResCompany(models.Model):
         [
             ("mock", "Mock (No External Delivery)"),
             ("http_json", "HTTP JSON Bridge"),
+            ("soap_owner_info", "SOAP Credential Check (GetOwnerInfoFromLogin)"),
         ],
         string="ISDS Submission Mode",
         default="mock",
         help=(
             "Mock mode stores a deterministic local submission receipt for testing. "
-            "HTTP JSON Bridge mode posts filing payloads to an external gateway service."
+            "HTTP JSON Bridge mode posts filing payloads to an external gateway service. "
+            "SOAP Credential Check validates direct ISDS SOAP credentials (test/prod endpoints)."
         ),
     )
     l10n_cz_isds_api_url = fields.Char(
-        string="ISDS Bridge API URL",
-        help="Endpoint used when ISDS Submission Mode is HTTP JSON Bridge.",
+        string="ISDS Endpoint URL",
+        help=(
+            "Endpoint URL used by non-mock ISDS modes. "
+            "Example SOAP test endpoint: https://ws1.czebox.cz/DS/DsManage"
+        ),
     )
     l10n_cz_isds_username = fields.Char(
-        string="ISDS Bridge Username",
+        string="ISDS Username",
         groups="base.group_system",
     )
     l10n_cz_isds_password = fields.Char(
-        string="ISDS Bridge Password",
+        string="ISDS Password",
         groups="base.group_system",
     )
     l10n_cz_isds_sender_box_id = fields.Char(
@@ -866,6 +871,128 @@ class ResCompany(models.Model):
             "raw_response": response_payload,
         }
 
+    def _l10n_cz_xml_local_name(self, tag):
+        return str(tag or "").split("}", 1)[-1]
+
+    def _l10n_cz_isds_parse_soap_owner_info(self, response_body):
+        self.ensure_one()
+        try:
+            root = ET.fromstring(response_body or "")
+        except ET.ParseError as exc:
+            raise UserError(_("ISDS SOAP response is not valid XML.")) from exc
+
+        fault_node = None
+        for node in root.iter():
+            if self._l10n_cz_xml_local_name(node.tag) == "Fault":
+                fault_node = node
+                break
+        if fault_node is not None:
+            fault_text = ""
+            for node in fault_node.iter():
+                local_name = self._l10n_cz_xml_local_name(node.tag)
+                text = (node.text or "").strip()
+                if local_name in {"faultstring", "Text", "Reason"} and text:
+                    fault_text = text
+                    break
+            if not fault_text:
+                fault_text = _("unknown SOAP fault")
+            raise UserError(_("ISDS SOAP call failed: %s") % (fault_text,))
+
+        owner_info = {}
+        accepted_fields = {
+            "dbID",
+            "dbIDOVM",
+            "firmName",
+            "ic",
+            "pnFirstName",
+            "pnLastName",
+            "adresaTextem",
+            "dbType",
+            "userType",
+        }
+        for node in root.iter():
+            local_name = self._l10n_cz_xml_local_name(node.tag)
+            if local_name not in accepted_fields or local_name in owner_info:
+                continue
+            text = (node.text or "").strip()
+            if text:
+                owner_info[local_name] = text
+        return owner_info
+
+    def _l10n_cz_isds_submit_soap_owner_info(self, payload):
+        self.ensure_one()
+        raw_url = (self.l10n_cz_isds_api_url or "").strip()
+        url = raw_url or "https://ws1.czebox.cz/DS/DsManage"
+        parsed_url = parse.urlsplit(url)
+        if parsed_url.netloc and (not parsed_url.path or parsed_url.path == "/"):
+            url = parse.urlunsplit(
+                (
+                    parsed_url.scheme or "https",
+                    parsed_url.netloc,
+                    "/DS/DsManage",
+                    "",
+                    "",
+                )
+            )
+        username = (self.l10n_cz_isds_username or "").strip()
+        password = self.l10n_cz_isds_password or ""
+        if not username or not password:
+            raise UserError(
+                _(
+                    "Set ISDS username and password before using SOAP credential-check mode."
+                )
+            )
+        timeout = max(1, int(self.l10n_cz_isds_timeout_seconds or 20))
+        envelope = (
+            "<?xml version='1.0' encoding='utf-8'?>"
+            "<soapenv:Envelope xmlns:soapenv='http://schemas.xmlsoap.org/soap/envelope/' "
+            "xmlns:db='http://isds.czechpoint.cz/v20'>"
+            "<soapenv:Body><db:GetOwnerInfoFromLogin/></soapenv:Body>"
+            "</soapenv:Envelope>"
+        )
+        headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "Accept": "text/xml",
+            "SOAPAction": "GetOwnerInfoFromLogin",
+            "User-Agent": "Odoo-CZ-VAT-Filing/19",
+        }
+        token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+        headers["Authorization"] = f"Basic {token}"
+        req = request.Request(url, data=envelope.encode("utf-8"), method="POST", headers=headers)
+        try:
+            with request.urlopen(req, timeout=timeout) as response:
+                response_body = response.read().decode("utf-8", errors="replace")
+        except (error.HTTPError, error.URLError, TimeoutError, ValueError) as exc:
+            raise UserError(_("ISDS SOAP call failed: %s") % (exc,)) from exc
+
+        owner_info = self._l10n_cz_isds_parse_soap_owner_info(response_body)
+        owner_token = (
+            owner_info.get("dbID")
+            or owner_info.get("ic")
+            or owner_info.get("firmName")
+            or _("unknown")
+        )
+        digest_seed = "|".join(
+            [
+                url,
+                owner_token,
+                payload.get("period_from") or "",
+                payload.get("period_to") or "",
+            ]
+        )
+        message_id = "SOAP-OWNER-" + hashlib.sha1(digest_seed.encode("utf-8")).hexdigest()[:16].upper()
+        return {
+            "message_id": message_id,
+            "delivery_info": _(
+                "SOAP credential check passed (GetOwnerInfoFromLogin). Filing XML was not submitted in this mode."
+            ),
+            "raw_response": {
+                "provider": "soap_owner_info",
+                "endpoint": url,
+                "owner_info": owner_info,
+            },
+        }
+
     def l10n_cz_isds_submit_history(self, history):
         self.ensure_one()
         history.ensure_one()
@@ -880,6 +1007,8 @@ class ResCompany(models.Model):
             result = self._l10n_cz_isds_submit_mock(payload)
         elif mode == "http_json":
             result = self._l10n_cz_isds_submit_http_json(payload)
+        elif mode == "soap_owner_info":
+            result = self._l10n_cz_isds_submit_soap_owner_info(payload)
         else:
             raise UserError(_("Unsupported ISDS submission mode: %s") % (mode,))
         result["payload"] = payload

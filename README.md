@@ -46,8 +46,11 @@ cp .env.example .env
 cp config.example/odoo.conf config/odoo.conf
 ```
 
-If you want automated ISDS bridge testing, fill `L10N_CZ_ISDS_*` values in `.env`
-(`L10N_CZ_ISDS_PASSWORD`, `L10N_CZ_ISDS_API_URL`, etc.).
+If you want automated ISDS testing, fill `L10N_CZ_ISDS_*` values in `.env`.
+For direct SOAP credential check use:
+
+- `L10N_CZ_ISDS_MODE=soap_owner_info`
+- `L10N_CZ_ISDS_API_URL=https://ws1.czebox.cz/DS/DsManage` (test)
 
 2. Prepare Odoo Mates worktree (if needed for your run):
 

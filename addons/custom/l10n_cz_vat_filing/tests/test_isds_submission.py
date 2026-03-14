@@ -216,3 +216,69 @@ class TestL10nCzIsdsSubmission(TransactionCase):
         self.assertEqual(history.isds_status, "error")
         self.assertIn("invalid base64", (history.isds_last_error or "").lower())
         self.assertEqual(action.get("tag"), "display_notification")
+
+    def test_soap_owner_info_mode_success(self):
+        history = self._new_history("SOAP-OWNER-OK")
+        self.company.write(
+            {
+                "l10n_cz_isds_enabled": True,
+                "l10n_cz_isds_mode": "soap_owner_info",
+                "l10n_cz_isds_api_url": "https://ws1.czebox.cz/DS/DsManage",
+                "l10n_cz_isds_username": "soap-user",
+                "l10n_cz_isds_password": "soap-pass",
+                "l10n_cz_isds_target_box_id": "pndaab6",
+            }
+        )
+        soap_response = (
+            "<soap:Envelope xmlns:soap='http://schemas.xmlsoap.org/soap/envelope/' "
+            "xmlns:db='http://isds.czechpoint.cz/v20'>"
+            "<soap:Body>"
+            "<db:GetOwnerInfoFromLoginResponse>"
+            "<db:dbID>q2abcde</db:dbID>"
+            "<db:firmName>Test Firma s.r.o.</db:firmName>"
+            "<db:ic>12345678</db:ic>"
+            "</db:GetOwnerInfoFromLoginResponse>"
+            "</soap:Body>"
+            "</soap:Envelope>"
+        )
+        captured = {}
+        with self._patch_http_response(soap_response, captured):
+            history.action_submit_isds()
+
+        self.assertEqual(history.isds_status, "submitted")
+        self.assertTrue((history.isds_message_id or "").startswith("SOAP-OWNER-"))
+        self.assertIn("credential check", (history.isds_delivery_info or "").lower())
+        self.assertIn("Basic ", captured.get("auth") or "")
+        self.assertIn("GetOwnerInfoFromLogin", captured.get("body") or "")
+        self.assertEqual(captured.get("method"), "POST")
+        self.assertIn('"dbID": "q2abcde"', history.isds_response_json or "")
+
+    def test_soap_owner_info_mode_fault_sets_error(self):
+        history = self._new_history("SOAP-OWNER-ERR")
+        self.company.write(
+            {
+                "l10n_cz_isds_enabled": True,
+                "l10n_cz_isds_mode": "soap_owner_info",
+                "l10n_cz_isds_api_url": "https://ws1.czebox.cz/DS/DsManage",
+                "l10n_cz_isds_username": "soap-user",
+                "l10n_cz_isds_password": "soap-pass",
+                "l10n_cz_isds_target_box_id": "pndaab6",
+            }
+        )
+        soap_fault = (
+            "<soap:Envelope xmlns:soap='http://schemas.xmlsoap.org/soap/envelope/'>"
+            "<soap:Body>"
+            "<soap:Fault>"
+            "<faultcode>soap:Client</faultcode>"
+            "<faultstring>Authentication failed</faultstring>"
+            "</soap:Fault>"
+            "</soap:Body>"
+            "</soap:Envelope>"
+        )
+        captured = {}
+        with self._patch_http_response(soap_fault, captured):
+            action = history.action_submit_isds()
+
+        self.assertEqual(history.isds_status, "error")
+        self.assertIn("authentication failed", (history.isds_last_error or "").lower())
+        self.assertEqual(action.get("tag"), "display_notification")
