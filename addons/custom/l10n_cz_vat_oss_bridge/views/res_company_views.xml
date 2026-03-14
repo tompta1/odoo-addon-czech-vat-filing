@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="view_company_form_l10n_cz_vat_oss_bridge_backfill" model="ir.ui.view">
+    <field name="name">res.company.form.l10n.cz.vat.oss.bridge.backfill</field>
+    <field name="model">res.company</field>
+    <field name="inherit_id" ref="l10n_cz_vat_filing.view_company_form_l10n_cz_vat_filing"/>
+    <field name="arch" type="xml">
+      <xpath expr="//button[@name='action_open_l10n_cz_vat_filing_export_wizard']" position="after">
+        <button
+          name="action_l10n_cz_oss_bridge_backfill"
+          type="object"
+          string="Backfill OSS/IOSS Regime"
+        />
+      </xpath>
+    </field>
+  </record>
+</odoo>

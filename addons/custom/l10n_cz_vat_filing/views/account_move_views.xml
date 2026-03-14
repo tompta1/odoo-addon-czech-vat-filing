@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="view_move_form_l10n_cz_vat_filing" model="ir.ui.view">
+    <field name="name">account.move.form.l10n.cz.vat.filing</field>
+    <field name="model">account.move</field>
+    <field name="inherit_id" ref="account.view_move_form"/>
+    <field name="arch" type="xml">
+      <xpath expr="//notebook" position="inside">
+        <page string="Czech VAT Filing">
+          <group>
+            <group>
+              <field name="l10n_cz_vat_regime"/>
+              <field name="l10n_cz_customs_mrn" invisible="l10n_cz_vat_regime != 'third_country_import'"/>
+              <field name="l10n_cz_customs_decision_number" invisible="l10n_cz_vat_regime != 'third_country_import'"/>
+              <field name="l10n_cz_customs_release_date" invisible="l10n_cz_vat_regime != 'third_country_import'"/>
+              <field name="l10n_cz_customs_office" invisible="l10n_cz_vat_regime != 'third_country_import'"/>
+              <field name="l10n_cz_customs_value_amount" invisible="l10n_cz_vat_regime != 'third_country_import'"/>
+              <field name="l10n_cz_customs_vat_amount" invisible="l10n_cz_vat_regime != 'third_country_import'"/>
+              <field name="l10n_cz_import_correction_origin_id" invisible="l10n_cz_vat_regime != 'third_country_import'"/>
+              <field name="l10n_cz_import_correction_reason" invisible="l10n_cz_vat_regime != 'third_country_import'"/>
+              <field name="l10n_cz_kh_document_reference"/>
+              <field name="l10n_cz_dph_tax_date"/>
+              <field name="l10n_cz_kh_tax_point_date"/>
+              <field name="l10n_cz_kh_deduction_date"/>
+              <field name="l10n_cz_dph_line_45_full_deduction"/>
+              <field name="l10n_cz_dph_line_45_reduced_deduction"/>
+              <field name="l10n_cz_dph_line_48_base_amount"/>
+              <field name="l10n_cz_dph_line_48_full_deduction"/>
+            </group>
+            <group>
+              <field name="l10n_cz_customs_note" invisible="l10n_cz_vat_regime != 'third_country_import'"/>
+              <field name="l10n_cz_kh_reverse_charge_code"/>
+              <field name="l10n_cz_kh_proportional_deduction"/>
+              <field name="l10n_cz_dph_line_48_reduced_deduction"/>
+              <field name="l10n_cz_dph_line_60_adjustment"/>
+            </group>
+          </group>
+        </page>
+      </xpath>
+      <xpath expr="//field[@name='invoice_line_ids']/list/field[@name='name']" position="after">
+        <field name="l10n_cz_kh_subject_code" optional="hide"/>
+      </xpath>
+    </field>
+  </record>
+</odoo>

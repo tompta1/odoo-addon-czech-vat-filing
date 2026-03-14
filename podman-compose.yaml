@@ -1,0 +1,38 @@
+version: "3.8"
+
+services:
+  web:
+    image: docker.io/library/odoo:${ODOO_MAJOR:-19}
+    container_name: odoo_web
+    depends_on:
+      - db
+    ports:
+      - "${ODOO_HTTP_PORT:-8069}:8069"
+    volumes:
+      - odoo_web_data:/var/lib/odoo:Z
+      - ./config:/etc/odoo:Z,U
+      - ./addons/odoomates-19:/mnt/odoomates-addons:Z,U
+      - ./addons/custom:/mnt/custom-addons:Z,U
+    environment:
+      - HOST=db
+      - USER=odoo
+      - PASSWORD=odoo
+    restart: always
+
+  db:
+    image: docker.io/library/postgres:${POSTGRES_VERSION:-16}
+    container_name: odoo_db
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=odoo
+      - POSTGRES_PASSWORD=odoo
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    volumes:
+      - odoo_db_data:/var/lib/postgresql/data:Z
+    restart: always
+
+volumes:
+  odoo_web_data:
+    name: odoo_web_data_${ODOO_MAJOR:-19}
+  odoo_db_data:
+    name: odoo_db_data_${ODOO_MAJOR:-19}

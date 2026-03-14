@@ -1,0 +1,124 @@
+from odoo import fields, models
+
+
+class AccountMove(models.Model):
+    _inherit = "account.move"
+
+    l10n_cz_vat_regime = fields.Selection(
+        selection=[
+            ("standard", "Standard CZ Filing"),
+            ("third_country_import", "3rd-Country Import"),
+            ("oss", "OSS Outside CZ Return"),
+            ("ioss", "IOSS Outside CZ Return"),
+        ],
+        string="CZ VAT Filing Regime",
+        default="standard",
+        help=(
+            "Use OSS/IOSS to exclude the move from the standard Czech DPH/KH/SH XML exports. "
+            "Use 3rd-Country Import to keep the move in Czech DPH while applying import-specific guards."
+        ),
+    )
+    l10n_cz_customs_mrn = fields.Char(
+        string="CZ Customs MRN",
+        help="Movement Reference Number (MRN) or other customs declaration reference for 3rd-country imports.",
+    )
+    l10n_cz_customs_decision_number = fields.Char(
+        string="CZ Customs Decision Number",
+        help="Customs office decision or JSD reference linked to the import evidence.",
+    )
+    l10n_cz_customs_release_date = fields.Date(
+        string="CZ Customs Release Date",
+        help="Date when the goods were released by customs.",
+    )
+    l10n_cz_customs_office = fields.Char(
+        string="CZ Customs Office",
+        help="Customs office that handled the import declaration.",
+    )
+    l10n_cz_customs_value_amount = fields.Float(
+        string="CZ Customs Value",
+        digits=(16, 2),
+        help="Customs value declared for the import document.",
+    )
+    l10n_cz_customs_vat_amount = fields.Float(
+        string="CZ Import VAT Amount",
+        digits=(16, 2),
+        help="VAT amount assessed from the customs declaration or JSD evidence.",
+    )
+    l10n_cz_customs_note = fields.Text(
+        string="CZ Customs Note",
+        help="Free-form customs/import note for audit trail and accountant review.",
+    )
+    l10n_cz_import_correction_origin_id = fields.Many2one(
+        "account.move",
+        string="CZ Import Correction Origin",
+        help=(
+            "Original posted 3rd-country import document (JSD evidence) that this import correction amends "
+            "for DPH row 45 handling."
+        ),
+    )
+    l10n_cz_import_correction_reason = fields.Char(
+        string="CZ Import Correction Reason",
+        help="Short audit note for the import correction under section 42/74 flow (e.g. customs value revision).",
+    )
+
+    l10n_cz_kh_document_reference = fields.Char(
+        string="CZ KH Document Reference",
+        help="Optional override for the evidence/document number used in Czech KH sections.",
+    )
+    l10n_cz_dph_tax_date = fields.Date(
+        string="CZ DPH Tax Date (DUZP)",
+        help="Tax-point date used for Czech DPH/KH period selection when it differs from the accounting date.",
+    )
+    l10n_cz_kh_tax_point_date = fields.Date(
+        string="CZ KH Tax Point Date",
+        help="Optional override for the Czech KH tax point date used in A1/A2/A4/B1/B2 rows.",
+    )
+    l10n_cz_kh_deduction_date = fields.Date(
+        string="CZ KH Deduction Date",
+        help="Reserved field for Czech filing deduction-date tracking on purchase documents.",
+    )
+    l10n_cz_kh_reverse_charge_code = fields.Selection(
+        selection=[(str(code), str(code)) for code in range(1, 21)],
+        string="CZ KH Reverse Charge Code",
+        help="Required for KH A1 and B1 rows generated from Czech reverse-charge tags.",
+    )
+    l10n_cz_kh_proportional_deduction = fields.Boolean(
+        string="CZ KH Proportional Deduction",
+        help="Routes deductible VAT to proportional-deduction fields and marks KH B2 rows as POMER=A.",
+    )
+    l10n_cz_dph_line_45_full_deduction = fields.Float(
+        string="CZ DPH Line 45 Full Deduction",
+        digits=(16, 2),
+        help="Special Czech DPH row 45 deduction amount in full.",
+    )
+    l10n_cz_dph_line_45_reduced_deduction = fields.Float(
+        string="CZ DPH Line 45 Reduced Deduction",
+        digits=(16, 2),
+        help="Special Czech DPH row 45 deduction amount in reduced scope.",
+    )
+    l10n_cz_dph_line_48_base_amount = fields.Float(
+        string="CZ DPH Line 48 Base",
+        digits=(16, 2),
+        help="Special Czech DPH row 48 base amount for registration-cancellation corrections.",
+    )
+    l10n_cz_dph_line_48_full_deduction = fields.Float(
+        string="CZ DPH Line 48 Full Deduction",
+        digits=(16, 2),
+        help="Special Czech DPH row 48 deduction amount in full.",
+    )
+    l10n_cz_dph_line_48_reduced_deduction = fields.Float(
+        string="CZ DPH Line 48 Reduced Deduction",
+        digits=(16, 2),
+        help="Special Czech DPH row 48 deduction amount in reduced scope.",
+    )
+    l10n_cz_dph_line_60_adjustment = fields.Float(
+        string="CZ DPH Line 60 Adjustment",
+        digits=(16, 2),
+        help="Special Czech DPH row 60 long-term adjustment amount under sections 78 to 78d.",
+    )
+
+    def l10n_cz_kh_draft_payload(self):
+        return self.env["l10n_cz.kh.draft.export"].build_payload(self)
+
+    def l10n_cz_kh_draft_json(self):
+        return self.env["l10n_cz.kh.draft.export"].build_json(self)

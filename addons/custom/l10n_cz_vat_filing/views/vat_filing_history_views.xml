@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="view_l10n_cz_vat_filing_history_tree" model="ir.ui.view">
+    <field name="name">l10n.cz.vat.filing.history.tree</field>
+    <field name="model">l10n_cz.vat.filing.history</field>
+    <field name="arch" type="xml">
+      <list string="Czech VAT Filing History" create="false">
+        <field name="name"/>
+        <field name="company_id"/>
+        <field name="date_from"/>
+        <field name="date_to"/>
+        <field name="submission_date"/>
+        <field name="dph_form"/>
+        <field name="kh_form"/>
+        <field name="sh_form"/>
+        <field name="create_uid"/>
+        <field name="create_date"/>
+      </list>
+    </field>
+  </record>
+
+  <record id="view_l10n_cz_vat_filing_history_form" model="ir.ui.view">
+    <field name="name">l10n.cz.vat.filing.history.form</field>
+    <field name="model">l10n_cz.vat.filing.history</field>
+    <field name="arch" type="xml">
+      <form string="Czech VAT Filing History" create="false" edit="false" delete="false">
+        <sheet>
+          <group>
+            <group>
+              <field name="name"/>
+              <field name="company_id"/>
+              <field name="date_from"/>
+              <field name="date_to"/>
+              <field name="submission_date"/>
+              <field name="tax_statement_date"/>
+            </group>
+            <group>
+              <field name="include_dphdp3"/>
+              <field name="include_dphkh1"/>
+              <field name="include_dphshv"/>
+              <field name="include_debug_json"/>
+              <field name="dph_form"/>
+              <field name="kh_form"/>
+              <field name="sh_form"/>
+            </group>
+          </group>
+          <group string="Attachments">
+            <group>
+              <field name="zip_attachment_id" readonly="1"/>
+              <field name="dphdp3_attachment_id" readonly="1"/>
+              <field name="dphkh1_attachment_id" readonly="1"/>
+              <field name="dphshv_attachment_id" readonly="1"/>
+              <field name="debug_attachment_id" readonly="1"/>
+            </group>
+          </group>
+          <group string="Warnings">
+            <field name="warning_messages" nolabel="1"/>
+          </group>
+          <group string="Options JSON">
+            <field name="options_json" nolabel="1"/>
+          </group>
+        </sheet>
+      </form>
+    </field>
+  </record>
+
+  <record id="action_l10n_cz_vat_filing_history" model="ir.actions.act_window">
+    <field name="name">Czech VAT Filing History</field>
+    <field name="res_model">l10n_cz.vat.filing.history</field>
+    <field name="view_mode">list,form</field>
+    <field name="context">{}</field>
+  </record>
+</odoo>

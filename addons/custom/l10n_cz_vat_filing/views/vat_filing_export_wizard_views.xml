@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="view_l10n_cz_vat_filing_export_wizard_form" model="ir.ui.view">
+    <field name="name">l10n.cz.vat.filing.export.wizard.form</field>
+    <field name="model">l10n_cz.vat.filing.export.wizard</field>
+    <field name="arch" type="xml">
+      <form string="Czech VAT Filing Export">
+        <group>
+          <group>
+            <field name="company_id" options="{'no_create': True}"/>
+            <field name="date_from"/>
+            <field name="date_to"/>
+            <field name="period_kind"/>
+            <field name="period_from"/>
+            <field name="period_to"/>
+          </group>
+          <group>
+            <field name="include_dphdp3"/>
+            <field name="include_dphkh1"/>
+            <field name="include_dphshv"/>
+            <field name="include_debug_json"/>
+          </group>
+        </group>
+
+        <group string="Form Metadata">
+          <group>
+            <field name="submission_date"/>
+            <field name="tax_statement_date"/>
+            <field name="dph_form"/>
+            <field name="kh_form"/>
+            <field name="sh_form"/>
+          </group>
+          <group>
+            <field name="kh_challenge_reference"/>
+            <field name="kh_challenge_response"/>
+          </group>
+        </group>
+
+        <group string="Year-End Settlement (Row 53)" invisible="not row_53_available">
+          <group>
+            <field name="row_53_available" invisible="1"/>
+            <field name="calculate_row_53"/>
+            <field name="actual_year_coefficient" required="calculate_row_53"/>
+          </group>
+        </group>
+
+        <footer>
+          <button name="action_export_zip" type="object" string="Download ZIP" class="btn-primary"/>
+          <button string="Cancel" special="cancel"/>
+        </footer>
+      </form>
+    </field>
+  </record>
+</odoo>

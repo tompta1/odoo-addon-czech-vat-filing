@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="view_company_form_l10n_cz_vat_filing" model="ir.ui.view">
+    <field name="name">res.company.form.l10n.cz.vat.filing</field>
+    <field name="model">res.company</field>
+    <field name="inherit_id" ref="base.view_company_form"/>
+    <field name="arch" type="xml">
+      <xpath expr="//notebook" position="inside">
+        <page string="Czech VAT Filing">
+          <group>
+            <group>
+              <button
+                name="action_open_l10n_cz_vat_filing_export_wizard"
+                type="object"
+                string="Open Export Wizard"
+                class="oe_highlight"
+              />
+              <button
+                name="action_open_l10n_cz_vat_filing_history"
+                type="object"
+                string="Open Export History"
+              />
+              <field name="l10n_cz_vat_filing_history_count" readonly="1"/>
+            </group>
+            <group>
+              <field name="l10n_cz_dph_use_manual_advance_coefficient"/>
+              <field
+                name="l10n_cz_dph_advance_coefficient"
+                invisible="not l10n_cz_dph_use_manual_advance_coefficient"
+              />
+            </group>
+          </group>
+        </page>
+      </xpath>
+    </field>
+  </record>
+</odoo>
