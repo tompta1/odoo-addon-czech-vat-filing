@@ -1,3 +1,4 @@
+from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
 from odoo.exceptions import UserError
@@ -278,6 +279,11 @@ class TestL10nCzVatFilingExport(TransactionCase):
         move = self.Move.create(vals)
         move.action_post()
         return move
+
+    def test_move_has_any_tag_uses_tag_presence_not_amount(self):
+        exporter = self.env["l10n_cz.vat.filing.export"]
+        with patch.object(type(exporter), "_move_tag_names", autospec=True, return_value={"VAT 33"}):
+            self.assertTrue(exporter._move_has_any_tag(self.Move.browse(), {"VAT 33"}))
 
     def test_duzp_period_selection_uses_czech_tax_date(self):
         move = self._create_move(

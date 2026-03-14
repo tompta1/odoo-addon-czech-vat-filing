@@ -19,6 +19,7 @@ class AccountPayment(models.Model):
             evaluation = company.l10n_cz_vat_registry_evaluate_partner(
                 payment.partner_id.commercial_partner_id,
                 bank_account=payment._l10n_cz_registry_bank_account_number(),
+                require_bank_account=True,
             )
             if evaluation["violations"]:
                 raise UserError("\n".join(evaluation["violations"]))
@@ -26,4 +27,3 @@ class AccountPayment(models.Model):
     def action_post(self):
         self._l10n_cz_check_registry_shield()
         return super().action_post()
-

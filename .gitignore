@@ -3,6 +3,7 @@
 !.env.example
 
 config/odoo.conf
+scripts/odoo_isds_smoke_test.sh
 
 __pycache__/
 *.py[cod]

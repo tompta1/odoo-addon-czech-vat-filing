@@ -137,20 +137,23 @@ class ResCompany(models.Model):
             ("mock", "Mock (No External Delivery)"),
             ("http_json", "HTTP JSON Bridge"),
             ("soap_owner_info", "SOAP Credential Check (GetOwnerInfoFromLogin)"),
+            ("soap_create_message", "SOAP Submit (CreateMessage)"),
         ],
         string="ISDS Submission Mode",
         default="mock",
         help=(
             "Mock mode stores a deterministic local submission receipt for testing. "
             "HTTP JSON Bridge mode posts filing payloads to an external gateway service. "
-            "SOAP Credential Check validates direct ISDS SOAP credentials (test/prod endpoints)."
+            "SOAP Credential Check validates direct ISDS SOAP credentials (test/prod endpoints). "
+            "SOAP Submit directly sends filing attachments via CreateMessage."
         ),
     )
     l10n_cz_isds_api_url = fields.Char(
         string="ISDS Endpoint URL",
         help=(
             "Endpoint URL used by non-mock ISDS modes. "
-            "Example SOAP test endpoint: https://ws1.czebox.cz/DS/DsManage"
+            "Examples: https://ws1.czebox.cz/DS/DsManage (credential check), "
+            "https://ws1.czebox.cz/DS/dz (CreateMessage submit)."
         ),
     )
     l10n_cz_isds_username = fields.Char(
@@ -570,7 +573,13 @@ class ResCompany(models.Model):
             limit=1,
         )
 
-    def l10n_cz_vat_registry_evaluate_partner(self, partner, bank_account=None, force_refresh=False):
+    def l10n_cz_vat_registry_evaluate_partner(
+        self,
+        partner,
+        bank_account=None,
+        force_refresh=False,
+        require_bank_account=False,
+    ):
         self.ensure_one()
         result = {
             "enabled": bool(self.l10n_cz_vat_registry_enabled),
@@ -652,6 +661,16 @@ class ResCompany(models.Model):
             if account
         }
         bank_published = None
+        if (
+            require_bank_account
+            and self.l10n_cz_vat_registry_block_unpublished_bank
+            and not normalized_checked_bank
+        ):
+            result["violations"].append(
+                _(
+                    "Select a supplier bank account before posting the payment so the Czech VAT registry shield can verify it."
+                )
+            )
         if normalized_checked_bank:
             bank_published = normalized_checked_bank in normalized_published if normalized_published else False
             result["bank_account_published"] = bank_published
@@ -874,6 +893,56 @@ class ResCompany(models.Model):
     def _l10n_cz_xml_local_name(self, tag):
         return str(tag or "").split("}", 1)[-1]
 
+    def _l10n_cz_isds_normalize_soap_endpoint(self, raw_url, default_path):
+        self.ensure_one()
+        candidate = (raw_url or "").strip()
+        if not candidate:
+            candidate = f"https://ws1.czebox.cz{default_path}"
+        elif "://" not in candidate:
+            candidate = f"https://{candidate.lstrip('/')}"
+
+        parsed_url = parse.urlsplit(candidate)
+        netloc = parsed_url.netloc or "ws1.czebox.cz"
+        path = parsed_url.path or default_path
+        if path == "/":
+            path = default_path
+        else:
+            path = path.rstrip("/") or default_path
+
+        # Allow users to keep one URL in config; remap DsManage for CreateMessage mode.
+        normalized_path = path.lower().rstrip("/")
+        if default_path == "/DS/dz" and normalized_path == "/ds/dsmanage":
+            path = "/DS/dz"
+
+        return parse.urlunsplit(
+            (
+                parsed_url.scheme or "https",
+                netloc,
+                path,
+                parsed_url.query or "",
+                parsed_url.fragment or "",
+            )
+        )
+
+    def _l10n_cz_isds_soap_fault_message(self, root):
+        self.ensure_one()
+        fault_node = None
+        for node in root.iter():
+            if self._l10n_cz_xml_local_name(node.tag) == "Fault":
+                fault_node = node
+                break
+        if fault_node is None:
+            return ""
+
+        for preferred in ("faultstring", "Text", "Reason", "faultcode", "Code"):
+            for node in fault_node.iter():
+                if self._l10n_cz_xml_local_name(node.tag) != preferred:
+                    continue
+                text = (node.text or "").strip()
+                if text:
+                    return text
+        return _("unknown SOAP fault")
+
     def _l10n_cz_isds_parse_soap_owner_info(self, response_body):
         self.ensure_one()
         try:
@@ -881,21 +950,8 @@ class ResCompany(models.Model):
         except ET.ParseError as exc:
             raise UserError(_("ISDS SOAP response is not valid XML.")) from exc
 
-        fault_node = None
-        for node in root.iter():
-            if self._l10n_cz_xml_local_name(node.tag) == "Fault":
-                fault_node = node
-                break
-        if fault_node is not None:
-            fault_text = ""
-            for node in fault_node.iter():
-                local_name = self._l10n_cz_xml_local_name(node.tag)
-                text = (node.text or "").strip()
-                if local_name in {"faultstring", "Text", "Reason"} and text:
-                    fault_text = text
-                    break
-            if not fault_text:
-                fault_text = _("unknown SOAP fault")
+        fault_text = self._l10n_cz_isds_soap_fault_message(root)
+        if fault_text:
             raise UserError(_("ISDS SOAP call failed: %s") % (fault_text,))
 
         owner_info = {}
@@ -919,21 +975,107 @@ class ResCompany(models.Model):
                 owner_info[local_name] = text
         return owner_info
 
-    def _l10n_cz_isds_submit_soap_owner_info(self, payload):
+    def _l10n_cz_isds_build_soap_create_message(self, payload):
         self.ensure_one()
-        raw_url = (self.l10n_cz_isds_api_url or "").strip()
-        url = raw_url or "https://ws1.czebox.cz/DS/DsManage"
-        parsed_url = parse.urlsplit(url)
-        if parsed_url.netloc and (not parsed_url.path or parsed_url.path == "/"):
-            url = parse.urlunsplit(
+        target_box = escape(payload.get("target_box_id") or "")
+        if not target_box:
+            raise UserError(_("Set ISDS Target Databox ID on company settings before submission."))
+
+        subject = (payload.get("subject") or _("Czech VAT Filing")).strip()
+        subject = subject[:255]
+        subject_xml = escape(subject)
+
+        attachments = payload.get("attachments") or []
+        if not attachments:
+            raise UserError(_("No filing attachment is available for Datova schranka submission."))
+
+        file_nodes = []
+        for index, attachment in enumerate(attachments):
+            filename = str(attachment.get("filename") or f"attachment_{index + 1}.xml").strip()
+            filename = filename.replace("/", "_").replace("\\", "_")
+            if not filename:
+                filename = f"attachment_{index + 1}.xml"
+            content_base64 = str(attachment.get("content_base64") or "").strip()
+            if not content_base64:
+                raise UserError(_("Attachment %s has no base64 content for ISDS SOAP submit.") % (filename,))
+            mime_type = str(attachment.get("mimetype") or "application/octet-stream").strip()
+            if not mime_type:
+                mime_type = "application/octet-stream"
+            file_meta = "main" if index == 0 else "enclosure"
+            file_nodes.append(
                 (
-                    parsed_url.scheme or "https",
-                    parsed_url.netloc,
-                    "/DS/DsManage",
-                    "",
-                    "",
+                    "<db:dmFile "
+                    f"dmFileDescr='{escape(filename)}' "
+                    f"dmMimeType='{escape(mime_type)}' "
+                    f"dmFileMetaType='{file_meta}'>"
+                    f"<db:dmEncodedContent>{content_base64}</db:dmEncodedContent>"
+                    "</db:dmFile>"
                 )
             )
+
+        return (
+            "<?xml version='1.0' encoding='utf-8'?>"
+            "<soapenv:Envelope xmlns:soapenv='http://schemas.xmlsoap.org/soap/envelope/' "
+            "xmlns:db='http://isds.czechpoint.cz/v20'>"
+            "<soapenv:Body>"
+            "<db:CreateMessage>"
+            "<db:dmEnvelope>"
+            f"<db:dbIDRecipient>{target_box}</db:dbIDRecipient>"
+            f"<db:dmAnnotation>{subject_xml}</db:dmAnnotation>"
+            "<db:dmPersonalDelivery>false</db:dmPersonalDelivery>"
+            "<db:dmAllowSubstDelivery>true</db:dmAllowSubstDelivery>"
+            "</db:dmEnvelope>"
+            "<db:dmFiles>"
+            f"{''.join(file_nodes)}"
+            "</db:dmFiles>"
+            "</db:CreateMessage>"
+            "</soapenv:Body>"
+            "</soapenv:Envelope>"
+        )
+
+    def _l10n_cz_isds_parse_soap_create_message(self, response_body):
+        self.ensure_one()
+        try:
+            root = ET.fromstring(response_body or "")
+        except ET.ParseError as exc:
+            raise UserError(_("ISDS SOAP response is not valid XML.")) from exc
+
+        fault_text = self._l10n_cz_isds_soap_fault_message(root)
+        if fault_text:
+            raise UserError(_("ISDS SOAP call failed: %s") % (fault_text,))
+
+        status_code = ""
+        status_message = ""
+        message_id = ""
+        for node in root.iter():
+            local_name = self._l10n_cz_xml_local_name(node.tag)
+            text = (node.text or "").strip()
+            if not text:
+                continue
+            if local_name in {"dmStatusCode", "StatusCode"} and not status_code:
+                status_code = text
+            elif local_name in {"dmStatusMessage", "StatusMessage"} and not status_message:
+                status_message = text
+            elif local_name in {"dmID", "dmId", "MessageId", "MessageID"} and not message_id:
+                message_id = text
+
+        if not status_code:
+            raise UserError(_("ISDS SOAP CreateMessage response did not contain dmStatusCode."))
+        if status_code not in {"0000", "0"}:
+            detail = status_message or _("unknown status")
+            raise UserError(_("ISDS SOAP CreateMessage rejected submission (%s): %s") % (status_code, detail))
+        if not message_id:
+            raise UserError(_("ISDS SOAP CreateMessage response did not contain dmID."))
+
+        return {
+            "status_code": status_code,
+            "status_message": status_message,
+            "message_id": message_id,
+        }
+
+    def _l10n_cz_isds_submit_soap_owner_info(self, payload):
+        self.ensure_one()
+        url = self._l10n_cz_isds_normalize_soap_endpoint(self.l10n_cz_isds_api_url, "/DS/DsManage")
         username = (self.l10n_cz_isds_username or "").strip()
         password = self.l10n_cz_isds_password or ""
         if not username or not password:
@@ -993,6 +1135,54 @@ class ResCompany(models.Model):
             },
         }
 
+    def _l10n_cz_isds_submit_soap_create_message(self, payload):
+        self.ensure_one()
+        url = self._l10n_cz_isds_normalize_soap_endpoint(self.l10n_cz_isds_api_url, "/DS/dz")
+        username = (self.l10n_cz_isds_username or "").strip()
+        password = self.l10n_cz_isds_password or ""
+        if not username or not password:
+            raise UserError(
+                _(
+                    "Set ISDS username and password before using SOAP CreateMessage mode."
+                )
+            )
+
+        timeout = max(1, int(self.l10n_cz_isds_timeout_seconds or 20))
+        envelope = self._l10n_cz_isds_build_soap_create_message(payload)
+        headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "Accept": "text/xml",
+            "SOAPAction": "CreateMessage",
+            "User-Agent": "Odoo-CZ-VAT-Filing/19",
+        }
+        token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+        headers["Authorization"] = f"Basic {token}"
+        req = request.Request(url, data=envelope.encode("utf-8"), method="POST", headers=headers)
+        try:
+            with request.urlopen(req, timeout=timeout) as response:
+                response_body = response.read().decode("utf-8", errors="replace")
+        except (error.HTTPError, error.URLError, TimeoutError, ValueError) as exc:
+            raise UserError(_("ISDS SOAP CreateMessage call failed: %s") % (exc,)) from exc
+
+        parsed = self._l10n_cz_isds_parse_soap_create_message(response_body)
+        return {
+            "message_id": parsed["message_id"],
+            "delivery_info": _(
+                "SOAP CreateMessage status %(code)s %(message)s"
+            )
+            % {
+                "code": parsed["status_code"],
+                "message": parsed["status_message"] or "",
+            },
+            "raw_response": {
+                "provider": "soap_create_message",
+                "endpoint": url,
+                "status_code": parsed["status_code"],
+                "status_message": parsed["status_message"],
+                "message_id": parsed["message_id"],
+            },
+        }
+
     def l10n_cz_isds_submit_history(self, history):
         self.ensure_one()
         history.ensure_one()
@@ -1009,6 +1199,8 @@ class ResCompany(models.Model):
             result = self._l10n_cz_isds_submit_http_json(payload)
         elif mode == "soap_owner_info":
             result = self._l10n_cz_isds_submit_soap_owner_info(payload)
+        elif mode == "soap_create_message":
+            result = self._l10n_cz_isds_submit_soap_create_message(payload)
         else:
             raise UserError(_("Unsupported ISDS submission mode: %s") % (mode,))
         result["payload"] = payload

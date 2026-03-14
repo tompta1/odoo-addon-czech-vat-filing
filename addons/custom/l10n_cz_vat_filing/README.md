@@ -150,7 +150,7 @@ Additional filing controls exposed on `res.company`:
 - `Block On VAT FX Lookup Errors`
 - default FX endpoint is prefilled to official ČNB `denni_kurz.txt`, parsed in native TXT format with `date=DD.MM.YYYY`
 - `Enable Datova Schranka Submission`
-- `ISDS Submission Mode` (`mock`, `http_json`, or `soap_owner_info`)
+- `ISDS Submission Mode` (`mock`, `http_json`, `soap_owner_info`, or `soap_create_message`)
 - `ISDS Endpoint URL`, `ISDS Username`, `ISDS Password`
 - `ISDS Sender Databox ID`, `ISDS Target Databox ID`, `ISDS Timeout (s)`
 
@@ -163,6 +163,9 @@ ISDS bridge response contract (HTTP JSON mode):
 - SOAP credential-check mode calls `GetOwnerInfoFromLogin` on configured endpoint
   (for test env typically `https://ws1.czebox.cz/DS/DsManage`) using HTTP Basic Auth
 - `soap_owner_info` mode validates credentials only; it does not submit filing XML payloads
+- SOAP submit mode calls `CreateMessage` on test endpoint `https://ws1.czebox.cz/DS/dz` using HTTP Basic Auth
+- `soap_create_message` mode submits filing XML attachments directly and stores SOAP status/message and `dmID`
+- `ISDS Sender Databox ID` is kept as local metadata; it is not serialized as `dmSenderOrgUnitNum`
 
 Built-in Odoo UI export wizard:
 

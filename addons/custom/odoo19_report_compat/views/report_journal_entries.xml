@@ -3,7 +3,7 @@
     <data>
         <template id="report_journal_entries_compat" inherit_id="accounting_pdf_reports.report_journal_entries">
             <xpath expr="//span[@t-field='line.analytic_account_id.display_name']" position="replace">
-                <span t-esc="line.analytic_distribution and ', '.join(sorted(line.analytic_distribution.keys())) or ''"/>
+                <span t-esc="line.odoo19_report_compat_analytic_names()"/>
             </xpath>
         </template>
     </data>

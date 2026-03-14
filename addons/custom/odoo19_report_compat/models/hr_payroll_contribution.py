@@ -24,6 +24,8 @@ class ContributionRegisterReport(models.AbstractModel):
     _description = "Payroll Contribution Register Report"
 
     def _get_payslip_lines(self, register_ids, date_from, date_to):
+        if not register_ids:
+            return {}
         result = {}
         self.env.cr.execute(
             """

@@ -1,98 +1,193 @@
 # Czech Odoo 19 VAT Filing Workspace
 
-Official workspace for Czech VAT filing add-ons and reproducible local runtime tooling.
-This repository is intended to be published as an add-on/tooling project, not as a full vendored Odoo distribution.
+Practical workspace for Czech VAT filing addons on Odoo 19 (`DPHDP3`, `DPHKH1`, `DPHSHV`) with Podman/Docker runtime helpers.
 
-## Project Scope
+## What You Get
 
-Main modules:
-
-- `addons/custom/l10n_cz_vat_filing`: Czech XML filing export for `DPHDP3`, `DPHKH1`, `DPHSHV`
-- `addons/custom/l10n_cz_vat_oss_bridge`: exclusion bridge for `OSS`/`IOSS` flows (`l10n_eu_oss`)
-- `addons/custom/odoo19_report_compat`: compatibility helpers for selected Odoo Mates report modules
-
-Current filing coverage (microSME focus) includes:
-
-- `KH` sections `A1`, `A2`, `A4`, `A5`, `B1`, `B2`, `B3`
-- DUZP-based period selection
-- automatic `KH` threshold routing (`10 000 CZK`) including refund handling
-- import and reverse-charge hardening (`KH` exclusion where legally required)
-- `DPH` rows including derived `46`, `52`, year-end settlement `53`, and explicit support for `45`, `48`, `60`
-- optional CZ VAT Registry Shield checks (supplier reliability and published bank account matching)
-- optional DUZP-based CZ VAT FX decoupling (ČNB feed + cache + manual override)
-
-For detailed addon behavior and field-level documentation, see:
-
-- `addons/custom/l10n_cz_vat_filing/README.md`
+- `addons/custom/l10n_cz_vat_filing` (main CZ VAT export addon)
+- `addons/custom/l10n_cz_vat_oss_bridge` (OSS/IOSS exclusion bridge)
+- scripts for seeding data, exporting XML, and ISDS config sync
+- `podman-compose.yaml` that is usable with `podman compose`, `podman-compose`, `docker compose`, and `docker-compose`
 
 ## Prerequisites
 
-- Linux environment (tested in Fedora Silverblue Toolbox)
+- Linux shell (tested in Fedora Silverblue Toolbox)
 - `git`
-- `podman` + `podman-compose` (recommended)
-- or `docker` + `docker compose` / `docker-compose`
-- free disk space for Odoo/PostgreSQL images and volumes
+- either:
+  - `podman` + `podman-compose` (recommended), or
+  - `docker` + `docker compose` / `docker-compose`
 
-Optional but useful:
+Optional on Silverblue/Toolbox:
 
-- `flatpak-spawn` on Silverblue/Toolbox for host Podman access (`flatpak-spawn --host podman ...`)
+- `flatpak-spawn` (for host Podman access)
 
-## Quick Start
-
-1. Prepare local config:
+## 1. Initial Setup
 
 ```bash
 cp .env.example .env
 cp config.example/odoo.conf config/odoo.conf
 ```
 
-If you want automated ISDS testing, fill `L10N_CZ_ISDS_*` values in `.env`.
-For direct SOAP credential check use:
-
-- `L10N_CZ_ISDS_MODE=soap_owner_info`
-- `L10N_CZ_ISDS_API_URL=https://ws1.czebox.cz/DS/DsManage` (test)
-
-2. Prepare Odoo Mates worktree (if needed for your run):
+If you need Odoo Mates addons in this workspace:
 
 ```bash
 ./scripts/prepare_odoomates_worktree.sh 19.0
 ```
 
-3. Start stack (Podman):
+## 2. Configuration Examples
+
+### `.env` minimal local profile (no ISDS submit)
+
+```dotenv
+ODOO_MAJOR=19
+POSTGRES_VERSION=16
+ODOO_HTTP_PORT=8069
+
+L10N_CZ_ISDS_ENABLED=false
+```
+
+### `.env` ISDS SOAP credential-check profile (test env)
+
+```dotenv
+ODOO_MAJOR=19
+POSTGRES_VERSION=16
+ODOO_HTTP_PORT=8069
+
+L10N_CZ_ISDS_ENABLED=true
+L10N_CZ_ISDS_MODE=soap_owner_info
+L10N_CZ_ISDS_API_URL=https://ws1.czebox.cz/DS/DsManage
+L10N_CZ_ISDS_USERNAME=YOUR_TEST_ISDS_USERNAME
+L10N_CZ_ISDS_PASSWORD=YOUR_TEST_ISDS_PASSWORD
+# optional metadata only (not serialized into SOAP CreateMessage envelope)
+L10N_CZ_ISDS_SENDER_BOX_ID=YOUR_BOX_ID
+L10N_CZ_ISDS_TARGET_BOX_ID=avbq58e
+L10N_CZ_ISDS_TIMEOUT_SECONDS=20
+```
+
+### `.env` ISDS SOAP submit profile (CreateMessage, test env)
+
+```dotenv
+ODOO_MAJOR=19
+POSTGRES_VERSION=16
+ODOO_HTTP_PORT=8069
+
+L10N_CZ_ISDS_ENABLED=true
+L10N_CZ_ISDS_MODE=soap_create_message
+# /DS/dz is the CreateMessage endpoint in test env
+L10N_CZ_ISDS_API_URL=https://ws1.czebox.cz/DS/dz
+L10N_CZ_ISDS_USERNAME=YOUR_TEST_ISDS_USERNAME
+L10N_CZ_ISDS_PASSWORD=YOUR_TEST_ISDS_PASSWORD
+L10N_CZ_ISDS_SENDER_BOX_ID=YOUR_BOX_ID
+L10N_CZ_ISDS_TARGET_BOX_ID=avbq58e
+L10N_CZ_ISDS_TIMEOUT_SECONDS=20
+```
+
+### `config/odoo.conf` production-oriented baseline
+
+Use this as a starting point for real deployments:
+
+```ini
+[options]
+addons_path = /mnt/odoomates-addons,/mnt/custom-addons
+data_dir = /var/lib/odoo
+
+# Required: set a strong random value
+admin_passwd = REPLACE_WITH_STRONG_RANDOM_PASSWORD
+
+db_host = db
+db_user = odoo
+db_password = REPLACE_DB_PASSWORD
+
+# Local/first-run defaults
+proxy_mode = True
+list_db = True
+log_level = info
+```
+
+Notes:
+
+- `admin_passwd` is for database management operations (not normal user login).
+- keep `.env` and `config/odoo.conf` private; do not commit real secrets.
+- after initial setup, for locked-down production use `list_db = False` and explicit `dbfilter = ^your_db_name$`.
+
+## 3. Start Containers
+
+Podman:
 
 ```bash
 podman compose -f podman-compose.yaml up -d
 ```
 
-Alternative invocation (legacy binary):
+Legacy Podman Compose binary:
 
 ```bash
 podman-compose -f podman-compose.yaml up -d
 ```
 
-4. The same compose file can also be started with Docker Compose:
+Docker:
 
 ```bash
 docker compose -f podman-compose.yaml up -d
+# or
 docker-compose -f podman-compose.yaml up -d
 ```
 
-Notes:
+After changing `.env`, recreate the web container so env vars are reloaded.
 
-- `podman-compose.yaml` uses a standard Compose format and is generally interchangeable for this project.
-- On some Docker installations, SELinux volume suffixes (`:Z,U`) may require adjustment.
-- after changing `.env`, recreate the web container so updated env variables are loaded
+## 4. Open Odoo UI
 
-## Common Workflows
+- URL: `http://localhost:${ODOO_HTTP_PORT}` (default `http://localhost:8069`)
+- first-time DB creation uses `admin_passwd` from `config/odoo.conf`
+- install at least:
+  - `l10n_cz_vat_filing`
+  - `l10n_cz_vat_oss_bridge` (if OSS/IOSS filtering is needed)
 
-Seed test data and export sample filings:
+## 5. Where To Click In UI
+
+Main configuration path:
+
+- `Settings -> Users & Companies -> Companies -> <Your Company> -> Czech VAT Filing`
+
+Key UI elements on that tab:
+
+- `Open Export Wizard` (create filing export ZIP/XML)
+- `Open Export History` (stored exports + attachments + ISDS status)
+- VAT Registry Shield settings
+- VAT FX (CNB) settings
+- Datová schránka (ISDS) settings
+
+History submission path:
+
+- open any `Czech VAT Filing Export History` record
+- use `Submit via Datová schránka` action/button
+- review fields:
+  - `Datova Schranka Status`
+  - `ISDS Message ID`
+  - `ISDS Last Error`
+  - `ISDS Response JSON`
+  - optional `ISDS Delivery Receipt`
+
+If ISDS values are in container env, sync them to the company record:
+
+```bash
+./scripts/odoo_apply_isds_env.sh odoo19_cz_test
+```
+
+## 6. Common CLI Flows
+
+Seed representative CZ VAT cases:
 
 ```bash
 ./scripts/odoo_seed_cz_vat_cases.sh
+```
+
+Export XML filings:
+
+```bash
 ./scripts/odoo_export_cz_vat_filings.sh 2026-03-01 2026-03-31 /tmp/cz-vat-filing
 ```
 
-Open generated XML in MF/EPO helper:
+Open XML in EPO helper:
 
 ```bash
 scripts/epo_open_form.sh /tmp/cz-vat-filing/dphdp3.xml
@@ -100,84 +195,58 @@ scripts/epo_open_form.sh /tmp/cz-vat-filing/dphkh1.xml
 scripts/epo_open_form.sh /tmp/cz-vat-filing/dphshv.xml
 ```
 
-Run module test suite from running container:
+Run addon tests:
 
 ```bash
 flatpak-spawn --host podman exec -i odoo_web sh -lc \
   "odoo -d odoo19_cz_test -c /etc/odoo/odoo.conf --http-port=10069 --stop-after-init -u l10n_cz_vat_filing --test-enable --test-tags /l10n_cz_vat_filing"
 ```
 
-Apply ISDS env values from container environment into current Odoo company settings:
+## 7. Publish/Release
 
-```bash
-./scripts/odoo_apply_isds_env.sh odoo19_cz_test
-```
+- release docs: `docs/release-publishing.md`
+- upstream references: `docs/odoomates-upstream.md`
+- tag workflow: `.github/workflows/main.yml`
 
-Optional multi-company variant (explicit company id):
-
-```bash
-./scripts/odoo_apply_isds_env.sh odoo19_cz_test 1
-```
-
-## Publication Guidance
-
-Recommended to keep in GitHub:
-
-- `addons/custom/`
-- `docs/`
-- `scripts/`
-- `podman-compose.yaml`
-- `.env.example`
-- `config.example/odoo.conf`
-- `.gitignore`
-- `README.md`
-- `CHANGELOG.md`
-
-Recommended to keep out of GitHub:
-
-- `addons/odoomates/`
-- `addons/odoomates-19/`
-- `addons/.odoomates-source/`
-- `config/odoo.conf`
-- `.env`
-- generated signing material, XML exports, caches, local secrets
-- local data blobs such as `accountant_laws_rag_v3_chunked.jsonl` unless intentionally published
-
-Track upstream refs instead of vendoring Odoo Mates code:
-
-- `docs/odoomates-upstream.md`
-
-## Release
-
-Release staging, tagging, and packaging:
-
-- `docs/release-publishing.md`
-- `.github/workflows/main.yml` (auto-packs and publishes GitHub Release on `v*` tags)
-
-Build addon zip artifacts:
+Create addon release archives:
 
 ```bash
 ./scripts/release_pack_addons.sh v19.0.22.0.0
 ```
 
-## TODO
+## 8. TODO
 
 - [ ] Add optional UI action for one-time historical backfill of VAT filing regimes on posted moves
 - [ ] Expand end-to-end reverse-charge (RPDP) scenarios and validation matrix
 - [ ] Add stronger import-correction (`row 45`) scenarios covering customs revaluation variants
-- [ ] Add optional direct submission pipeline integration (Datová schránka / ISDS), including delivery receipt capture
+- [ ] Expand ISDS lifecycle support (delivery-state polling, message metadata retrieval, and retries)
 - [ ] Add dedicated integration test harness for live-like ADIS/VIES/ARES responses (local mock server profile)
 - [ ] Improve contributor guide with troubleshooting for Toolbox/Silverblue networking and container permissions
 
-## References
+## 9. Appendix (Technical Scope)
 
-- Addon internals: `addons/custom/l10n_cz_vat_filing/README.md`
-- Odoo Mates upstream refs: `docs/odoomates-upstream.md`
-- Release process: `docs/release-publishing.md`
-- Test plan notes: `docs/odoo19-cz-test-plan.md`
+Main module paths:
+
+- `addons/custom/l10n_cz_vat_filing`
+- `addons/custom/l10n_cz_vat_oss_bridge`
+- `addons/custom/odoo19_report_compat`
+
+Current filing scope (microSME-focused):
+
+- KH sections `A1`, `A2`, `A4`, `A5`, `B1`, `B2`, `B3`
+- DUZP-based period selection
+- automatic `KH` threshold routing (`10 000 CZK`) including refund logic
+- import/reverse-charge hardening (`KH` exclusion where legally required)
+- DPH rows including derived `46`, `52`, year-end `53`, plus explicit `45`, `48`, `60`
+- optional CZ VAT Registry Shield
+- optional CZ VAT FX (ČNB) decoupling
+
+Deep addon behavior and field-level mapping:
+
+- `addons/custom/l10n_cz_vat_filing/README.md`
 
 ## License
 
-- Workspace custom code in this repository is licensed under `MIT` (see `LICENSE`).
-- The MIT license includes explicit "AS IS" / no-warranty terms.
-- Third-party code (for example `addons/odoomates*`) remains under its original upstream licenses and is not relicensed by this repository.
+- this repository custom code is under `MIT` (`LICENSE`)
+- MIT includes explicit `AS IS` / no-warranty terms
+- third-party addons (for example `addons/odoomates*`) remain under upstream licenses

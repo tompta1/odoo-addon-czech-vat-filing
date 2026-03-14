@@ -12,6 +12,7 @@ class TestL10nCzVatRegistryShield(TransactionCase):
         cls.Account = cls.env["account.account"]
         cls.Journal = cls.env["account.journal"]
         cls.Move = cls.env["account.move"]
+        cls.Payment = cls.env["account.payment"]
         cls.Partner = cls.env["res.partner"]
         cls.PartnerBank = cls.env["res.partner.bank"]
         cls.Tax = cls.env["account.tax"]
@@ -41,6 +42,7 @@ class TestL10nCzVatRegistryShield(TransactionCase):
         )
         cls.purchase_account = cls._find_account(["expense", "expense_direct_cost", "expense_depreciation"])
         cls.purchase_journal = cls._find_journal("purchase")
+        cls.bank_journal = cls._find_journal("bank")
         cls.tax_purchase_domestic = cls._find_tax("purchase", ["VAT 40 Base", "VAT 40 Total"])
 
     @classmethod
@@ -118,6 +120,19 @@ class TestL10nCzVatRegistryShield(TransactionCase):
                         },
                     )
                 ],
+            }
+        )
+
+    def _draft_supplier_payment(self, partner, amount=1000):
+        return self.Payment.create(
+            {
+                "payment_type": "outbound",
+                "partner_type": "supplier",
+                "partner_id": partner.id,
+                "amount": amount,
+                "date": "2027-03-20",
+                "journal_id": self.bank_journal.id,
+                "payment_method_line_id": self.bank_journal.outbound_payment_method_line_ids[:1].id,
             }
         )
 
@@ -210,6 +225,23 @@ class TestL10nCzVatRegistryShield(TransactionCase):
         self.assertEqual(bill.state, "posted")
         self.assertTrue(bill.l10n_cz_vat_registry_check_id)
         self.assertIn("shield check passed", (bill.l10n_cz_vat_registry_note or "").lower())
+
+    def test_supplier_payment_post_is_blocked_without_bank_account_selection(self):
+        supplier = self._new_cz_supplier("PAYMISS", "CZ10000006")
+        payment = self._draft_supplier_payment(supplier)
+        self.assertFalse(payment.partner_bank_id)
+
+        with patch.object(
+            type(self.company),
+            "_l10n_cz_vat_registry_fetch",
+            autospec=True,
+            return_value=self._mock_registry_result(accounts=["19-5555555555/0800"]),
+        ) as mocked_fetch:
+            with self.assertRaisesRegex(UserError, "Select a supplier bank account"):
+                payment.action_post()
+            self.assertEqual(mocked_fetch.call_count, 1)
+
+        self.assertEqual(payment.state, "draft")
 
     def test_registry_result_is_reused_from_cache(self):
         supplier = self._new_cz_supplier("CACHE", "CZ10000004")

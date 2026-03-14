@@ -5,11 +5,12 @@ class HrPayslip(models.Model):
     _inherit = "hr.payslip"
 
     def refund_sheet(self):
-        copied_payslip = self.env["hr.payslip"]
+        copied_payslips = self.env["hr.payslip"]
         for payslip in self:
-            copied_payslip = payslip.copy({"credit_note": True, "name": _("Refund: ") + payslip.name})
-            copied_payslip.compute_sheet()
-            copied_payslip.action_payslip_done()
+            refund = payslip.copy({"credit_note": True, "name": _("Refund: ") + payslip.name})
+            refund.compute_sheet()
+            refund.action_payslip_done()
+            copied_payslips |= refund
         form_view_ref = self.env.ref("om_hr_payroll.view_hr_payslip_form", False)
         list_view_ref = self.env.ref("om_hr_payroll.view_hr_payslip_tree", False)
         return {
@@ -20,7 +21,7 @@ class HrPayslip(models.Model):
             "res_model": "hr.payslip",
             "type": "ir.actions.act_window",
             "target": "current",
-            "domain": "[('id', 'in', %s)]" % copied_payslip.ids,
+            "domain": "[('id', 'in', %s)]" % copied_payslips.ids,
             "views": [
                 (list_view_ref.id if list_view_ref else False, "list"),
                 (form_view_ref.id if form_view_ref else False, "form"),

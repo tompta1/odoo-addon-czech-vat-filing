@@ -51,6 +51,11 @@ mode_aliases = {
     'soap': 'soap_owner_info',
     'soap_test': 'soap_owner_info',
     'soap_owner': 'soap_owner_info',
+    'soap_owner_info': 'soap_owner_info',
+    'soap_create': 'soap_create_message',
+    'soap_submit': 'soap_create_message',
+    'soap_direct': 'soap_create_message',
+    'soap_create_message': 'soap_create_message',
     'bridge': 'http_json',
     'json': 'http_json',
 }

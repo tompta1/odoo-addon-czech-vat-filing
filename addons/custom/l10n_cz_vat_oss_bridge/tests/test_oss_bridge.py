@@ -143,6 +143,28 @@ class TestL10nCzVatOssBridge(TransactionCase):
         move.action_post()
         return move
 
+    def _create_out_invoice_draft(self, marker, price, invoice_date, product=None):
+        line_vals = {
+            "name": marker,
+            "quantity": 1,
+            "price_unit": price,
+            "account_id": self.sale_account.id,
+            "tax_ids": [(6, 0, [self.tax_sale_oss.id])],
+        }
+        if product:
+            line_vals["product_id"] = product.id
+        return self.Move.create(
+            {
+                "move_type": "out_invoice",
+                "partner_id": self.partner_de_private.id,
+                "journal_id": self.sale_journal.id,
+                "invoice_date": invoice_date,
+                "date": invoice_date,
+                "invoice_origin": marker,
+                "invoice_line_ids": [(0, 0, line_vals)],
+            }
+        )
+
     def test_detects_oss_regime_from_oss_tax_tag(self):
         move = self._create_out_invoice("OSS-BRIDGE-OSS", 1000, "2030-03-10")
         self.assertEqual(move.l10n_cz_vat_regime, "oss")
@@ -178,3 +200,22 @@ class TestL10nCzVatOssBridge(TransactionCase):
         self.assertEqual(move.l10n_cz_vat_regime, "oss")
         self.assertEqual(action["type"], "ir.actions.client")
         self.assertEqual(action["tag"], "display_notification")
+
+    def test_sync_clears_regime_when_oss_markers_are_removed(self):
+        move = self._create_out_invoice_draft("OSS-BRIDGE-RESET", 900, "2030-03-14")
+        self.assertEqual(move.l10n_cz_vat_regime, "oss")
+
+        move.write(
+            {
+                "invoice_line_ids": [
+                    (
+                        1,
+                        move.invoice_line_ids[0].id,
+                        {"tax_ids": [(6, 0, [self.tax_sale_domestic.id])]},
+                    )
+                ]
+            }
+        )
+        move.invalidate_recordset(["l10n_cz_vat_regime"])
+
+        self.assertEqual(move.l10n_cz_vat_regime, "standard")

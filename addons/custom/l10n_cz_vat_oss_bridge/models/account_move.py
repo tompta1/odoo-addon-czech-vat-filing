@@ -57,6 +57,10 @@ class AccountMove(models.Model):
                 move.with_context(skip_l10n_cz_oss_bridge=True).write(
                     {"l10n_cz_vat_regime": detected}
                 )
+            elif not detected and move.l10n_cz_vat_regime in {"oss", "ioss"}:
+                move.with_context(skip_l10n_cz_oss_bridge=True).write(
+                    {"l10n_cz_vat_regime": "standard"}
+                )
 
     @api.model_create_multi
     def create(self, vals_list):

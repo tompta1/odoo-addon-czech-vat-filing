@@ -160,12 +160,6 @@ class AccountMove(models.Model):
         help="Latest VAT FX resolution note for Czech VAT export purposes.",
     )
 
-    def l10n_cz_kh_draft_payload(self):
-        return self.env["l10n_cz.kh.draft.export"].build_payload(self)
-
-    def l10n_cz_kh_draft_json(self):
-        return self.env["l10n_cz.kh.draft.export"].build_json(self)
-
     def _l10n_cz_registry_bank_account_number(self):
         self.ensure_one()
         return (self.partner_bank_id.acc_number or "").strip()

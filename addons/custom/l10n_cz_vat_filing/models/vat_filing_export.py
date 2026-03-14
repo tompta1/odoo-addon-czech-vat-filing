@@ -379,19 +379,37 @@ class L10nCzVatFilingExport(models.AbstractModel):
             return False
         return self._move_amount_total_czk(origin) > Decimal("10000.00")
 
-    def _period_moves(self, company, date_from, date_to):
-        domain = [
+    def _period_move_domain(self, company, date_from, date_to):
+        return [
             ("company_id", "=", company.id),
             ("state", "=", "posted"),
             ("move_type", "in", ["out_invoice", "out_refund", "in_invoice", "in_refund"]),
+            "|",
+            "|",
+            "&",
+            "&",
+            ("l10n_cz_dph_tax_date", "!=", False),
+            ("l10n_cz_dph_tax_date", ">=", date_from),
+            ("l10n_cz_dph_tax_date", "<=", date_to),
+            "&",
+            "&",
+            "&",
+            ("l10n_cz_dph_tax_date", "=", False),
+            ("invoice_date", "!=", False),
+            ("invoice_date", ">=", date_from),
+            ("invoice_date", "<=", date_to),
+            "&",
+            "&",
+            "&",
+            ("l10n_cz_dph_tax_date", "=", False),
+            ("invoice_date", "=", False),
+            ("date", ">=", date_from),
+            ("date", "<=", date_to),
         ]
-        # Czech DPH/KH period selection follows DUZP, not the accounting date.
-        # This Odoo 19 stack has no native account.move tax_date field, so the addon
-        # filters in Python using the explicit Czech tax-date fallback chain.
-        moves = self.env["account.move"].search(domain, order="date,id")
-        return moves.filtered(
-            lambda move: date_from <= self._move_dph_tax_date(move) <= date_to
-        )
+
+    def _period_moves(self, company, date_from, date_to):
+        domain = self._period_move_domain(company, date_from, date_to)
+        return self.env["account.move"].search(domain, order="date,id")
 
     def _posted_moves(self, company, date_from, date_to):
         moves = self._period_moves(company, date_from, date_to)
@@ -704,7 +722,7 @@ class L10nCzVatFilingExport(models.AbstractModel):
         return vat_country or country_code, vat_number or self._vat_core(partner.vat)
 
     def _move_has_any_tag(self, move, tag_names):
-        return bool(self._move_tag_amount(move, tag_names))
+        return bool(self._move_tag_names(move).intersection(set(tag_names)))
 
     def _dph_move_excluded_tags(self, move):
         excluded = set()

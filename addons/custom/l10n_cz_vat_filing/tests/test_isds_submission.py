@@ -282,3 +282,109 @@ class TestL10nCzIsdsSubmission(TransactionCase):
         self.assertEqual(history.isds_status, "error")
         self.assertIn("authentication failed", (history.isds_last_error or "").lower())
         self.assertEqual(action.get("tag"), "display_notification")
+
+    def test_soap_create_message_mode_success(self):
+        history = self._new_history("SOAP-CREATE-OK")
+        self.company.write(
+            {
+                "l10n_cz_isds_enabled": True,
+                "l10n_cz_isds_mode": "soap_create_message",
+                # Intentional DsManage URL (with trailing slash) to validate remap to /DS/dz.
+                "l10n_cz_isds_api_url": "https://ws1.czebox.cz/DS/DsManage/",
+                "l10n_cz_isds_username": "soap-user",
+                "l10n_cz_isds_password": "soap-pass",
+                "l10n_cz_isds_sender_box_id": "n7gmcim",
+                "l10n_cz_isds_target_box_id": "avbq58e",
+            }
+        )
+        soap_response = (
+            "<soap:Envelope xmlns:soap='http://schemas.xmlsoap.org/soap/envelope/' "
+            "xmlns:db='http://isds.czechpoint.cz/v20'>"
+            "<soap:Body>"
+            "<db:CreateMessageResponse>"
+            "<db:dmStatus>"
+            "<db:dmStatusCode>0000</db:dmStatusCode>"
+            "<db:dmStatusMessage>Provedeno uspesne.</db:dmStatusMessage>"
+            "</db:dmStatus>"
+            "<db:dmID>12677207</db:dmID>"
+            "</db:CreateMessageResponse>"
+            "</soap:Body>"
+            "</soap:Envelope>"
+        )
+        captured = {}
+        with self._patch_http_response(soap_response, captured):
+            history.action_submit_isds()
+
+        self.assertEqual(history.isds_status, "submitted")
+        self.assertEqual(history.isds_message_id, "12677207")
+        self.assertIn("/DS/dz", captured.get("url") or "")
+        self.assertIn("CreateMessage", captured.get("body") or "")
+        self.assertIn("<db:dbIDRecipient>avbq58e</db:dbIDRecipient>", captured.get("body") or "")
+        self.assertIn("<db:dmEncodedContent>", captured.get("body") or "")
+        self.assertNotIn("dmSenderOrgUnitNum", captured.get("body") or "")
+        self.assertIn("Basic ", captured.get("auth") or "")
+        self.assertIn("soap_create_message", history.isds_response_json or "")
+
+    def test_soap_create_message_mode_fault_sets_error(self):
+        history = self._new_history("SOAP-CREATE-FAULT")
+        self.company.write(
+            {
+                "l10n_cz_isds_enabled": True,
+                "l10n_cz_isds_mode": "soap_create_message",
+                "l10n_cz_isds_api_url": "https://ws1.czebox.cz/DS/dz",
+                "l10n_cz_isds_username": "soap-user",
+                "l10n_cz_isds_password": "soap-pass",
+                "l10n_cz_isds_target_box_id": "pndaab6",
+            }
+        )
+        soap_fault = (
+            "<soap:Envelope xmlns:soap='http://schemas.xmlsoap.org/soap/envelope/'>"
+            "<soap:Body>"
+            "<soap:Fault>"
+            "<faultcode>soap:Client</faultcode>"
+            "<faultstring>Unknown operation: CreateMessage</faultstring>"
+            "</soap:Fault>"
+            "</soap:Body>"
+            "</soap:Envelope>"
+        )
+        captured = {}
+        with self._patch_http_response(soap_fault, captured):
+            action = history.action_submit_isds()
+
+        self.assertEqual(history.isds_status, "error")
+        self.assertIn("unknown operation", (history.isds_last_error or "").lower())
+        self.assertEqual(action.get("tag"), "display_notification")
+
+    def test_soap_create_message_mode_status_error_sets_error(self):
+        history = self._new_history("SOAP-CREATE-STATUS-ERR")
+        self.company.write(
+            {
+                "l10n_cz_isds_enabled": True,
+                "l10n_cz_isds_mode": "soap_create_message",
+                "l10n_cz_isds_api_url": "https://ws1.czebox.cz/DS/dz",
+                "l10n_cz_isds_username": "soap-user",
+                "l10n_cz_isds_password": "soap-pass",
+                "l10n_cz_isds_target_box_id": "pndaab6",
+            }
+        )
+        soap_response = (
+            "<soap:Envelope xmlns:soap='http://schemas.xmlsoap.org/soap/envelope/' "
+            "xmlns:db='http://isds.czechpoint.cz/v20'>"
+            "<soap:Body>"
+            "<db:CreateMessageResponse>"
+            "<db:dmStatus>"
+            "<db:dmStatusCode>2011</db:dmStatusCode>"
+            "<db:dmStatusMessage>Neplatny identifikator schranky prijemce.</db:dmStatusMessage>"
+            "</db:dmStatus>"
+            "</db:CreateMessageResponse>"
+            "</soap:Body>"
+            "</soap:Envelope>"
+        )
+        captured = {}
+        with self._patch_http_response(soap_response, captured):
+            action = history.action_submit_isds()
+
+        self.assertEqual(history.isds_status, "error")
+        self.assertIn("2011", (history.isds_last_error or ""))
+        self.assertIn("neplatny", (history.isds_last_error or "").lower())
+        self.assertEqual(action.get("tag"), "display_notification")
