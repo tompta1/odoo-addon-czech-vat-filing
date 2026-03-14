@@ -363,13 +363,17 @@ class ResCompany(models.Model):
             for node in root.iter()
         )
         if has_fault:
-            fault_values = self._l10n_cz_xml_text_values(
-                root,
-                ["faultString", "faultCode", "reason", "text", "message"],
-            )
+            fault_strings = self._l10n_cz_xml_text_values(root, ["faultString", "reason", "text", "message"])
+            fault_codes = self._l10n_cz_xml_text_values(root, ["faultCode"])
+            if fault_strings:
+                fault_message = fault_strings[0]
+            elif fault_codes:
+                fault_message = fault_codes[0]
+            else:
+                fault_message = _("VAT registry API returned a SOAP fault.")
             return {
                 "status": "error",
-                "error_message": fault_values[0] if fault_values else _("VAT registry API returned a SOAP fault."),
+                "error_message": fault_message,
                 "payload": {"raw": body},
                 "is_unreliable": False,
                 "published_bank_accounts": [],
@@ -396,6 +400,22 @@ class ResCompany(models.Model):
             "is_unreliable": is_unreliable,
             "published_bank_accounts": self._l10n_cz_extract_bank_accounts_from_xml(root),
         }
+
+    def _l10n_cz_vat_registry_parse_response_body(self, body):
+        stripped = (body or "").lstrip()
+        if stripped.startswith("<"):
+            return self._l10n_cz_vat_registry_parse_xml_payload(body)
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            return {
+                "status": "error",
+                "error_message": _("VAT registry API response is not valid JSON or XML."),
+                "payload": {"raw": body},
+                "is_unreliable": False,
+                "published_bank_accounts": [],
+            }
+        return self._l10n_cz_vat_registry_parse_json_payload(payload)
 
     def _l10n_cz_registry_is_soap_endpoint(self, base_url):
         parsed = parse.urlsplit(base_url or "")
@@ -477,23 +497,7 @@ class ResCompany(models.Model):
                 "is_unreliable": False,
                 "published_bank_accounts": [],
             }
-        stripped = (body or "").lstrip()
-        if stripped.startswith("<"):
-            parsed_result = self._l10n_cz_vat_registry_parse_xml_payload(body)
-            parsed_result["source_url"] = url
-            return parsed_result
-        try:
-            payload = json.loads(body)
-        except json.JSONDecodeError:
-            return {
-                "status": "error",
-                "error_message": _("VAT registry API response is not valid JSON or XML."),
-                "source_url": url,
-                "payload": {"raw": body},
-                "is_unreliable": False,
-                "published_bank_accounts": [],
-            }
-        parsed_result = self._l10n_cz_vat_registry_parse_json_payload(payload)
+        parsed_result = self._l10n_cz_vat_registry_parse_response_body(body)
         parsed_result["source_url"] = url
         return parsed_result
 

@@ -342,3 +342,81 @@ class TestL10nCzVatRegistryShield(TransactionCase):
 
         self.assertEqual(result["status"], "error")
         self.assertIn("INVALID_INPUT", result["error_message"])
+
+    def test_registry_fetch_parses_vies_invalid_without_error_code(self):
+        self.company.write(
+            {
+                "l10n_cz_vat_registry_api_url": (
+                    "https://ec.europa.eu/taxation_customs/vies/rest-api/check-vat-test-service"
+                ),
+                "l10n_cz_vat_registry_vat_param": "vatNumber",
+            }
+        )
+        body = '{"isValid":false}'
+        captured = {}
+        with self._patch_registry_http_body(body, captured):
+            result = self.company._l10n_cz_vat_registry_fetch("200")
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("invalid according to VIES", result["error_message"])
+
+    def test_registry_fetch_parses_generic_json_registry_payload(self):
+        self.company.write(
+            {
+                "l10n_cz_vat_registry_api_url": "https://example.test/vat-registry",
+                "l10n_cz_vat_registry_vat_param": "dic",
+            }
+        )
+        body = (
+            '{"nespolehlivyPlatce":"ANO",'
+            '"zverejnene_ucty":[{"cislo_uctu":"19-1111111111/0800"},{"cislo_uctu":"19-1111111111/0800"}]}'
+        )
+        captured = {}
+        with self._patch_registry_http_body(body, captured):
+            result = self.company._l10n_cz_vat_registry_fetch("CZ11111111")
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["is_unreliable"])
+        self.assertEqual(result["published_bank_accounts"], ["19-1111111111/0800"])
+
+    def test_registry_fetch_returns_error_for_soap_fault(self):
+        self.company.write(
+            {
+                "l10n_cz_vat_registry_api_url": (
+                    "https://adisrws.mfcr.cz/dpr/axis2/services/"
+                    "rozhraniCRPDPH.rozhraniCRPDPHSOAP"
+                ),
+            }
+        )
+        body = (
+            "<?xml version='1.0' encoding='UTF-8'?>"
+            "<soapenv:Envelope xmlns:soapenv='http://schemas.xmlsoap.org/soap/envelope/'>"
+            "<soapenv:Body>"
+            "<soapenv:Fault>"
+            "<faultcode>soapenv:Server</faultcode>"
+            "<faultstring>Service unavailable</faultstring>"
+            "</soapenv:Fault>"
+            "</soapenv:Body>"
+            "</soapenv:Envelope>"
+        )
+        captured = {}
+        with self._patch_registry_http_body(body, captured):
+            result = self.company._l10n_cz_vat_registry_fetch("CZ12345678")
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Service unavailable", result["error_message"])
+
+    def test_registry_fetch_returns_error_for_malformed_payload(self):
+        self.company.write(
+            {
+                "l10n_cz_vat_registry_api_url": "https://example.test/vat-registry",
+                "l10n_cz_vat_registry_vat_param": "dic",
+            }
+        )
+        body = "upstream unavailable"
+        captured = {}
+        with self._patch_registry_http_body(body, captured):
+            result = self.company._l10n_cz_vat_registry_fetch("CZ12345678")
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("not valid JSON or XML", result["error_message"])
