@@ -1,23 +1,106 @@
-# Czech Odoo 19 VAT Filing Sandbox
+# Czech Odoo 19 VAT Filing Workspace
 
-This repository is best published as a small addon-and-tooling workspace, not as a full vendored Odoo distribution.
+Official workspace for Czech VAT filing add-ons and reproducible local runtime tooling.
+This repository is intended to be published as an add-on/tooling project, not as a full vendored Odoo distribution.
 
-It currently contains:
+## Project Scope
 
-- `addons/custom/l10n_cz_vat_filing`: Czech VAT filing export for `DP3`, `KH1`, and `SHV`
-- `addons/custom/l10n_cz_vat_oss_bridge`: bridge module that maps `l10n_eu_oss` transactions into Czech filing regime exclusions
-- `addons/custom/odoo19_report_compat`: Odoo 19 compatibility fixes for specific Odoo Mates report modules
-- optional local runtime helpers for Podman, EPO submission testing, and Odoo Mates worktree setup
+Main modules:
 
-## Is It Odoo Mates-Specific?
+- `addons/custom/l10n_cz_vat_filing`: Czech XML filing export for `DPHDP3`, `DPHKH1`, `DPHSHV`
+- `addons/custom/l10n_cz_vat_oss_bridge`: exclusion bridge for `OSS`/`IOSS` flows (`l10n_eu_oss`)
+- `addons/custom/odoo19_report_compat`: compatibility helpers for selected Odoo Mates report modules
 
-- `l10n_cz_vat_filing`: no. It depends only on core Odoo `account` plus `l10n_cz`.
-- `l10n_cz_vat_oss_bridge`: mostly no. It depends on `l10n_cz_vat_filing` and Odoo's `l10n_eu_oss`.
-- `odoo19_report_compat`: yes. It exists only to patch/report around Odoo Mates modules.
+Current filing coverage (microSME focus) includes:
 
-If you want a clean public GitHub repository focused on Czech filing work, the most important things to publish are `addons/custom/l10n_cz_vat_filing` and `addons/custom/l10n_cz_vat_oss_bridge`.
+- `KH` sections `A1`, `A2`, `A4`, `A5`, `B1`, `B2`, `B3`
+- DUZP-based period selection
+- automatic `KH` threshold routing (`10 000 CZK`) including refund handling
+- import and reverse-charge hardening (`KH` exclusion where legally required)
+- `DPH` rows including derived `46`, `52`, year-end settlement `53`, and explicit support for `45`, `48`, `60`
+- optional CZ VAT Registry Shield checks (supplier reliability and published bank account matching)
+- optional DUZP-based CZ VAT FX decoupling (ČNB feed + cache + manual override)
 
-## What To Publish
+For detailed addon behavior and field-level documentation, see:
+
+- `addons/custom/l10n_cz_vat_filing/README.md`
+
+## Prerequisites
+
+- Linux environment (tested in Fedora Silverblue Toolbox)
+- `git`
+- `podman` + `podman-compose` (recommended)
+- or `docker` + `docker compose` / `docker-compose`
+- free disk space for Odoo/PostgreSQL images and volumes
+
+Optional but useful:
+
+- `flatpak-spawn` on Silverblue/Toolbox for host Podman access (`flatpak-spawn --host podman ...`)
+
+## Quick Start
+
+1. Prepare local config:
+
+```bash
+cp .env.example .env
+cp config.example/odoo.conf config/odoo.conf
+```
+
+2. Prepare Odoo Mates worktree (if needed for your run):
+
+```bash
+./scripts/prepare_odoomates_worktree.sh 19.0
+```
+
+3. Start stack (Podman):
+
+```bash
+podman compose -f podman-compose.yaml up -d
+```
+
+Alternative invocation (legacy binary):
+
+```bash
+podman-compose -f podman-compose.yaml up -d
+```
+
+4. The same compose file can also be started with Docker Compose:
+
+```bash
+docker compose -f podman-compose.yaml up -d
+docker-compose -f podman-compose.yaml up -d
+```
+
+Notes:
+
+- `podman-compose.yaml` uses a standard Compose format and is generally interchangeable for this project.
+- On some Docker installations, SELinux volume suffixes (`:Z,U`) may require adjustment.
+
+## Common Workflows
+
+Seed test data and export sample filings:
+
+```bash
+./scripts/odoo_seed_cz_vat_cases.sh
+./scripts/odoo_export_cz_vat_filings.sh 2026-03-01 2026-03-31 /tmp/cz-vat-filing
+```
+
+Open generated XML in MF/EPO helper:
+
+```bash
+scripts/epo_open_form.sh /tmp/cz-vat-filing/dphdp3.xml
+scripts/epo_open_form.sh /tmp/cz-vat-filing/dphkh1.xml
+scripts/epo_open_form.sh /tmp/cz-vat-filing/dphshv.xml
+```
+
+Run module test suite from running container:
+
+```bash
+flatpak-spawn --host podman exec -i odoo_web sh -lc \
+  "odoo -d odoo19_cz_test -c /etc/odoo/odoo.conf --http-port=10069 --stop-after-init -u l10n_cz_vat_filing --test-enable --test-tags /l10n_cz_vat_filing"
+```
+
+## Publication Guidance
 
 Recommended to keep in GitHub:
 
@@ -29,6 +112,7 @@ Recommended to keep in GitHub:
 - `config.example/odoo.conf`
 - `.gitignore`
 - `README.md`
+- `CHANGELOG.md`
 
 Recommended to keep out of GitHub:
 
@@ -37,74 +121,37 @@ Recommended to keep out of GitHub:
 - `addons/.odoomates-source/`
 - `config/odoo.conf`
 - `.env`
-- `accountant_laws_rag_v3_chunked.jsonl`
-- generated signing material, XML exports, caches, and local secrets
+- generated signing material, XML exports, caches, local secrets
+- local data blobs such as `accountant_laws_rag_v3_chunked.jsonl` unless intentionally published
 
-The repo should record upstream Odoo Mates refs, not vendor their code. See [docs/odoomates-upstream.md](/var/home/tom/Documents/Projects/odoo-podman-codex/docs/odoomates-upstream.md).
+Track upstream refs instead of vendoring Odoo Mates code:
 
-## Why Keep Compose And Scripts?
+- `docs/odoomates-upstream.md`
 
-Yes, I would keep the Podman compose file and shell scripts in the public repo, but as optional convenience tooling rather than as the core product.
+## Release
 
-That gives you:
+Release staging, tagging, and packaging:
 
-- a fast local smoke-test path for contributors
-- a reproducible way to fetch Odoo Mates dependencies
-- reusable EPO open/sign/submit helpers for Czech filing tests
+- `docs/release-publishing.md`
 
-The only change needed for GitHub is to publish a config example, not your live `config/odoo.conf`.
-
-## Quick Start
-
-```bash
-cp .env.example .env
-cp config.example/odoo.conf config/odoo.conf
-./scripts/prepare_odoomates_worktree.sh 19.0
-podman compose up -d
-```
-
-On Fedora Silverblue with Toolbox or a host Podman wrapper, you can still use the included helper scripts if direct container access needs `flatpak-spawn --host`.
-
-## Current Addon Scope
-
-`l10n_cz_vat_filing` currently covers a tested Czech microSME path:
-
-- posted Czech VAT invoices and vendor bills
-- XML generation for `DP3`, `KH1`, and `SHV`
-- `KH` sections `A1`, `A2`, `A4`, `A5`, `B1`, `B2`, and `B3`
-- `DPH` output and deduction lines driven by `l10n_cz` tags for domestic VAT, EU acquisitions, domestic reverse charge received supplies, triangular trade, exempt import, vehicle purchases, bad-debt corrections, import/customs deduction, and non-established-supplier adjustments
-- third-country import hardening that keeps import-tagged moves out of `KH`
-- move-level `OSS` / `IOSS` exclusion from the standard Czech XML exports
-- derived `DPH` rows `46`, `52`, and year-end `53`, plus explicit move-field support for special rows `45`, `48`, and `60`
-- `SH` rows for intra-EU goods, services, and triangular-trade supply (`k_pln_eu=2`)
-- period selection by Czech DUZP through `CZ DPH Tax Date (DUZP)`, not just by accounting date
-- `VetaD` header control through export options such as `submission_date`, `tax_statement_date`, `dph_form`, `kh_form`, and `sh_form`
-- form-selection flags such as `include_dphkh1=false` for quarterly `DPH` runs on legal entities
-- quarterly hardening that blocks legally invalid combined exports for legal entities and quarterly `SH` with goods/triangular rows
-- structure validation against the official MF opener
-- test submission transport up to certificate-policy validation
-
-It is still not a full legal Czech VAT filing engine for every edge case and still does not include qualified signing credentials. The exporter now covers `VAT 23/24/47/50/51/61` and the rest of the stock `l10n_cz` VAT tax tags, derives `DPH` rows `46`, `52`, and year-end `53`, and supports special `DPH` rows `45`, `48`, and `60` through explicit move fields.
-
-Repeatable local smoke helpers are included:
-
-```bash
-./scripts/migrate_l10n_cz_vat_filing_module.sh
-./scripts/odoo_seed_cz_vat_cases.sh
-./scripts/odoo_export_cz_vat_filings.sh 2026-03-01 2026-03-31 /tmp/cz-vat-filing
-```
-
-## Release Workflow
-
-Release staging, tagging, and packaging steps are documented in
-[docs/release-publishing.md](/var/home/tom/Documents/Projects/odoo-podman-codex/docs/release-publishing.md).
-
-Build addon zip artifacts for GitHub Releases / Odoo Apps:
+Build addon zip artifacts:
 
 ```bash
 ./scripts/release_pack_addons.sh v19.0.22.0.0
 ```
 
-## Odoo Mates Refs
+## TODO
 
-The exact upstream remote, tested branch, and local commit refs are recorded in [docs/odoomates-upstream.md](/var/home/tom/Documents/Projects/odoo-podman-codex/docs/odoomates-upstream.md).
+- [ ] Add optional UI action for one-time historical backfill of VAT filing regimes on posted moves
+- [ ] Expand end-to-end reverse-charge (RPDP) scenarios and validation matrix
+- [ ] Add stronger import-correction (`row 45`) scenarios covering customs revaluation variants
+- [ ] Add optional direct submission pipeline integration (Datová schránka / ISDS), including delivery receipt capture
+- [ ] Add dedicated integration test harness for live-like ADIS/VIES/ARES responses (local mock server profile)
+- [ ] Improve contributor guide with troubleshooting for Toolbox/Silverblue networking and container permissions
+
+## References
+
+- Addon internals: `addons/custom/l10n_cz_vat_filing/README.md`
+- Odoo Mates upstream refs: `docs/odoomates-upstream.md`
+- Release process: `docs/release-publishing.md`
+- Test plan notes: `docs/odoo19-cz-test-plan.md`
