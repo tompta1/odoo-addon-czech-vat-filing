@@ -1,7 +1,7 @@
 {
     "name": "Odoo 19 Report Compatibility",
     "summary": "Compatibility fixes for third-party reports on Odoo 19",
-    "version": "19.0.1.0.0",
+    "version": "19.0.2.0.0",
     "category": "Accounting",
     "license": "Other OSI approved licence",
     "author": "OpenAI Codex",

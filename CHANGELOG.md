@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-03-14 - Release Candidate `v19.0.23.0.0`
+
+### `l10n_cz_vat_filing` `19.0.23.0.0`
+- Removed the obsolete `l10n_cz_kh_draft` addon tree and the leftover draft KH export model from the main filing addon.
+- Hardened VAT registry payment shielding so outbound supplier payments require a selected bank account when unpublished-account blocking is enabled.
+- Reduced Czech filing move selection to a DUZP-aware search domain instead of scanning all posted invoice/refund moves.
+- Fixed tag-presence checks so correction/bad-debt logic no longer depends on summed tag amounts being non-zero.
+- Added regression tests for payment shielding and tag-presence behavior.
+
+### `l10n_cz_vat_oss_bridge` `19.0.3.0.0`
+- Reset `l10n_cz_vat_regime` back to `standard` when OSS/IOSS markers are removed from a move.
+- Added regression coverage for regime reset after tax-tag changes.
+
+### `odoo19_report_compat` `19.0.2.0.0`
+- Fixed multi-record payslip refunds so the returned action includes all generated refund payslips.
+- Guarded the contribution-register report against empty register selections.
+- Render analytic distribution names instead of raw analytic account IDs in the journal entries report.
+- Added focused compatibility tests for the report helper methods.
+
 ## 2026-03-14 - Workspace Licensing Update
 
 - Switched workspace `LICENSE` from `LGPL-3.0-or-later` to `MIT`.
