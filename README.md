@@ -46,6 +46,9 @@ cp .env.example .env
 cp config.example/odoo.conf config/odoo.conf
 ```
 
+If you want automated ISDS bridge testing, fill `L10N_CZ_ISDS_*` values in `.env`
+(`L10N_CZ_ISDS_PASSWORD`, `L10N_CZ_ISDS_API_URL`, etc.).
+
 2. Prepare Odoo Mates worktree (if needed for your run):
 
 ```bash
@@ -75,6 +78,7 @@ Notes:
 
 - `podman-compose.yaml` uses a standard Compose format and is generally interchangeable for this project.
 - On some Docker installations, SELinux volume suffixes (`:Z,U`) may require adjustment.
+- after changing `.env`, recreate the web container so updated env variables are loaded
 
 ## Common Workflows
 
@@ -98,6 +102,18 @@ Run module test suite from running container:
 ```bash
 flatpak-spawn --host podman exec -i odoo_web sh -lc \
   "odoo -d odoo19_cz_test -c /etc/odoo/odoo.conf --http-port=10069 --stop-after-init -u l10n_cz_vat_filing --test-enable --test-tags /l10n_cz_vat_filing"
+```
+
+Apply ISDS env values from container environment into current Odoo company settings:
+
+```bash
+./scripts/odoo_apply_isds_env.sh odoo19_cz_test
+```
+
+Optional multi-company variant (explicit company id):
+
+```bash
+./scripts/odoo_apply_isds_env.sh odoo19_cz_test 1
 ```
 
 ## Publication Guidance
