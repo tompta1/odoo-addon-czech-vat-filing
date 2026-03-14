@@ -131,6 +131,32 @@ class TestL10nCzVatRegistryShield(TransactionCase):
             "published_bank_accounts": accounts or [],
         }
 
+    def _patch_registry_http_body(self, body, captured):
+        class _FakeResponse:
+            def __init__(self, text):
+                self._text = text
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return self._text.encode("utf-8")
+
+        def _fake_urlopen(req, timeout=10):
+            captured["url"] = req.full_url
+            captured["timeout"] = timeout
+            captured["method"] = req.get_method()
+            captured["request_body"] = (req.data or b"").decode("utf-8", errors="replace")
+            return _FakeResponse(body)
+
+        return patch(
+            "odoo.addons.l10n_cz_vat_filing.models.res_company.request.urlopen",
+            side_effect=_fake_urlopen,
+        )
+
     def test_vendor_bill_post_is_blocked_for_unreliable_supplier(self):
         supplier = self._new_cz_supplier("UNREL", "CZ10000001")
         bank = self._new_partner_bank(supplier, "19-1234567890/0800")
@@ -220,3 +246,99 @@ class TestL10nCzVatRegistryShield(TransactionCase):
         self.assertTrue(bill.l10n_cz_vat_registry_check_id)
         self.assertIn("lookup failed", (bill.l10n_cz_vat_registry_note or "").lower())
 
+    def test_registry_fetch_parses_adis_soap_response(self):
+        self.company.write(
+            {
+                "l10n_cz_vat_registry_api_url": (
+                    "https://adisrws.mfcr.cz/dpr/axis2/services/"
+                    "rozhraniCRPDPH.rozhraniCRPDPHSOAP"
+                ),
+                "l10n_cz_vat_registry_vat_param": "dic",
+            }
+        )
+        body = (
+            "<?xml version='1.0' encoding='UTF-8'?>"
+            "<soapenv:Envelope xmlns:soapenv='http://schemas.xmlsoap.org/soap/envelope/' "
+            "xmlns:dph='http://adis.mfcr.cz/rozhraniCRPDPH/'>"
+            "<soapenv:Body>"
+            "<dph:getStatusNespolehlivySubjektRozsirenyResponse>"
+            "<dph:status>NENI_NESPOLEHLIVY_PLATCE</dph:status>"
+            "<dph:zverejneneUcty><dph:ucet>19-1234567890/0800</dph:ucet></dph:zverejneneUcty>"
+            "</dph:getStatusNespolehlivySubjektRozsirenyResponse>"
+            "</soapenv:Body>"
+            "</soapenv:Envelope>"
+        )
+        captured = {}
+        with self._patch_registry_http_body(body, captured):
+            result = self.company._l10n_cz_vat_registry_fetch("CZ27082440")
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["is_unreliable"])
+        self.assertIn("19-1234567890/0800", result["published_bank_accounts"])
+        self.assertEqual(captured["method"], "POST")
+        self.assertIn("getStatusNespolehlivySubjektRozsireny", captured["request_body"])
+        self.assertIn("CZ27082440", captured["request_body"])
+
+    def test_registry_fetch_marks_unreliable_from_adis_soap_response(self):
+        self.company.write(
+            {
+                "l10n_cz_vat_registry_api_url": (
+                    "https://adisrws.mfcr.cz/dpr/axis2/services/"
+                    "rozhraniCRPDPH.rozhraniCRPDPHSOAP"
+                ),
+            }
+        )
+        body = (
+            "<?xml version='1.0' encoding='UTF-8'?>"
+            "<soapenv:Envelope xmlns:soapenv='http://schemas.xmlsoap.org/soap/envelope/' "
+            "xmlns:dph='http://adis.mfcr.cz/rozhraniCRPDPH/'>"
+            "<soapenv:Body>"
+            "<dph:getStatusNespolehlivySubjektRozsirenyResponse>"
+            "<dph:status>JE_NESPOLEHLIVY_PLATCE</dph:status>"
+            "</dph:getStatusNespolehlivySubjektRozsirenyResponse>"
+            "</soapenv:Body>"
+            "</soapenv:Envelope>"
+        )
+        captured = {}
+        with self._patch_registry_http_body(body, captured):
+            result = self.company._l10n_cz_vat_registry_fetch("CZ12345678")
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["is_unreliable"])
+
+    def test_registry_fetch_parses_vies_test_service_valid(self):
+        self.company.write(
+            {
+                "l10n_cz_vat_registry_api_url": (
+                    "https://ec.europa.eu/taxation_customs/vies/rest-api/check-vat-test-service"
+                ),
+                "l10n_cz_vat_registry_vat_param": "vatNumber",
+            }
+        )
+        body = '{"vatNumber":"100","requestDate":"2026-03-14","isValid":true}'
+        captured = {}
+        with self._patch_registry_http_body(body, captured):
+            result = self.company._l10n_cz_vat_registry_fetch("100")
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["is_unreliable"])
+        self.assertEqual(result["published_bank_accounts"], [])
+        self.assertEqual(captured["method"], "GET")
+        self.assertIn("vatNumber=100", captured["url"])
+
+    def test_registry_fetch_parses_vies_test_service_invalid(self):
+        self.company.write(
+            {
+                "l10n_cz_vat_registry_api_url": (
+                    "https://ec.europa.eu/taxation_customs/vies/rest-api/check-vat-test-service"
+                ),
+                "l10n_cz_vat_registry_vat_param": "vatNumber",
+            }
+        )
+        body = '{"vatNumber":"201","requestDate":"2026-03-14","isValid":false,"userError":"INVALID_INPUT"}'
+        captured = {}
+        with self._patch_registry_http_body(body, captured):
+            result = self.company._l10n_cz_vat_registry_fetch("201")
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("INVALID_INPUT", result["error_message"])

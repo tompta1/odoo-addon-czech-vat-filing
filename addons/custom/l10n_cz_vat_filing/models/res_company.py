@@ -1,8 +1,10 @@
 import calendar
 import json
 import re
+import xml.etree.ElementTree as ET
 from datetime import timedelta
 from urllib import error, parse, request
+from xml.sax.saxutils import escape
 
 from odoo import _, fields, models
 from odoo.exceptions import UserError
@@ -210,6 +212,9 @@ class ResCompany(models.Model):
                             if item.get(key):
                                 accounts.append(str(item[key]))
                                 break
+        return self._l10n_cz_dedupe_bank_accounts(accounts)
+
+    def _l10n_cz_dedupe_bank_accounts(self, accounts):
         deduped = []
         seen = set()
         for account in accounts:
@@ -220,11 +225,205 @@ class ResCompany(models.Model):
             deduped.append(account.strip())
         return deduped
 
+    def _l10n_cz_registry_is_unreliable(self, value):
+        signature = self._l10n_cz_key_signature(value if isinstance(value, str) else str(value or ""))
+        if not signature:
+            return False
+        if signature in {
+            "jenespolehlivyplatce",
+            "nespolehlivyplatce",
+            "jenespolehlivysubjekt",
+            "nespolehlivysubjekt",
+        }:
+            return True
+        if signature in {
+            "neninespolehlivyplatce",
+            "neninespolehlivysubjekt",
+        }:
+            return False
+        return self._l10n_cz_truthy(value)
+
+    def _l10n_cz_xml_local_name(self, tag):
+        if "}" in tag:
+            return tag.rsplit("}", 1)[-1]
+        return tag
+
+    def _l10n_cz_xml_text_values(self, root, candidates):
+        signatures = {self._l10n_cz_key_signature(candidate) for candidate in candidates}
+        values = []
+        for node in root.iter():
+            if self._l10n_cz_key_signature(self._l10n_cz_xml_local_name(node.tag)) not in signatures:
+                continue
+            text = (node.text or "").strip()
+            if text:
+                values.append(text)
+        return values
+
+    def _l10n_cz_extract_bank_accounts_from_xml(self, root):
+        values = self._l10n_cz_xml_text_values(
+            root,
+            [
+                "published_bank_accounts",
+                "publishedAccounts",
+                "bank_accounts",
+                "bankAccounts",
+                "accounts",
+                "zverejnene_ucty",
+                "zverejneneUcty",
+                "zverejnenyUcet",
+                "ucet",
+                "ucty",
+                "bankovniUcet",
+                "accountNumber",
+                "iban",
+                "cislo_uctu",
+                "cisloUctu",
+            ],
+        )
+        account_pattern = re.compile(r"\b(?:\d{1,6}-)?\d{2,10}/\d{4}\b")
+        iban_pattern = re.compile(r"\bCZ\d{22}\b")
+        accounts = []
+        for value in values:
+            account_matches = account_pattern.findall(value)
+            iban_matches = iban_pattern.findall(value)
+            if account_matches or iban_matches:
+                accounts.extend(account_matches)
+                accounts.extend(iban_matches)
+                continue
+            if "/" in value or value.upper().startswith("CZ"):
+                accounts.append(value)
+        return self._l10n_cz_dedupe_bank_accounts(accounts)
+
+    def _l10n_cz_vat_registry_parse_json_payload(self, payload):
+        vies_valid = self._l10n_cz_payload_first_value(payload, ["valid", "isValid"])
+        vies_error = self._l10n_cz_payload_first_value(
+            payload,
+            [
+                "userError",
+                "errorCode",
+                "faultCode",
+                "faultString",
+                "error",
+                "message",
+            ],
+        )
+        if vies_valid is not None or vies_error is not None:
+            if self._l10n_cz_truthy(vies_valid):
+                return {
+                    "status": "ok",
+                    "error_message": "",
+                    "payload": payload,
+                    "is_unreliable": False,
+                    "published_bank_accounts": [],
+                }
+            if vies_error:
+                error_message = str(vies_error)
+            else:
+                error_message = _("VAT number is invalid according to VIES.")
+            return {
+                "status": "error",
+                "error_message": error_message,
+                "payload": payload,
+                "is_unreliable": False,
+                "published_bank_accounts": [],
+            }
+
+        unreliable_raw = self._l10n_cz_payload_first_value(
+            payload,
+            [
+                "is_unreliable",
+                "unreliable",
+                "nespolehlivy_platce",
+                "nespolehlivy",
+                "nespolehlivyPlatce",
+            ],
+        )
+        return {
+            "status": "ok",
+            "error_message": "",
+            "payload": payload,
+            "is_unreliable": self._l10n_cz_registry_is_unreliable(unreliable_raw),
+            "published_bank_accounts": self._l10n_cz_extract_bank_accounts(payload),
+        }
+
+    def _l10n_cz_vat_registry_parse_xml_payload(self, body):
+        try:
+            root = ET.fromstring(body)
+        except ET.ParseError:
+            return {
+                "status": "error",
+                "error_message": _("VAT registry API response is not valid XML."),
+                "payload": {"raw": body},
+                "is_unreliable": False,
+                "published_bank_accounts": [],
+            }
+
+        has_fault = any(
+            self._l10n_cz_key_signature(self._l10n_cz_xml_local_name(node.tag)) == "fault"
+            for node in root.iter()
+        )
+        if has_fault:
+            fault_values = self._l10n_cz_xml_text_values(
+                root,
+                ["faultString", "faultCode", "reason", "text", "message"],
+            )
+            return {
+                "status": "error",
+                "error_message": fault_values[0] if fault_values else _("VAT registry API returned a SOAP fault."),
+                "payload": {"raw": body},
+                "is_unreliable": False,
+                "published_bank_accounts": [],
+            }
+
+        status_values = self._l10n_cz_xml_text_values(
+            root,
+            [
+                "isUnreliable",
+                "unreliable",
+                "nespolehlivy_platce",
+                "nespolehlivyPlatce",
+                "nespolehlivySubjekt",
+                "statusNespolehlivySubjekt",
+                "statusNespolehlivehoPlatce",
+                "status",
+            ],
+        )
+        is_unreliable = any(self._l10n_cz_registry_is_unreliable(value) for value in status_values)
+        return {
+            "status": "ok",
+            "error_message": "",
+            "payload": {"raw": body},
+            "is_unreliable": is_unreliable,
+            "published_bank_accounts": self._l10n_cz_extract_bank_accounts_from_xml(root),
+        }
+
+    def _l10n_cz_registry_is_soap_endpoint(self, base_url):
+        parsed = parse.urlsplit(base_url or "")
+        path = (parsed.path or "").lower()
+        return "rozhranicrpdph" in path and "soap" in path
+
+    def _l10n_cz_vat_registry_soap_body(self, vat):
+        vat_xml = escape(vat or "")
+        return (
+            "<?xml version='1.0' encoding='utf-8'?>"
+            "<soapenv:Envelope xmlns:soapenv='http://schemas.xmlsoap.org/soap/envelope/' "
+            "xmlns:dph='http://adis.mfcr.cz/rozhraniCRPDPH/'>"
+            "<soapenv:Header/>"
+            "<soapenv:Body>"
+            "<dph:getStatusNespolehlivySubjektRozsireny>"
+            f"<dph:dic>{vat_xml}</dph:dic>"
+            "</dph:getStatusNespolehlivySubjektRozsireny>"
+            "</soapenv:Body>"
+            "</soapenv:Envelope>"
+        ).encode("utf-8")
+
     def _l10n_cz_build_registry_url(self, vat):
         self.ensure_one()
         base_url = (self.l10n_cz_vat_registry_api_url or "").strip()
         if not base_url:
             return ""
+        if self._l10n_cz_registry_is_soap_endpoint(base_url):
+            return base_url
         if "{vat}" in base_url:
             return base_url.replace("{vat}", parse.quote(vat, safe=""))
         parsed = parse.urlsplit(base_url)
@@ -245,10 +444,30 @@ class ResCompany(models.Model):
                 "published_bank_accounts": [],
             }
         timeout = max(1, int(self.l10n_cz_vat_registry_timeout_seconds or 10))
-        req = request.Request(url, headers={"Accept": "application/json", "User-Agent": "Odoo-CZ-VAT-Filing/19"})
+        is_soap = self._l10n_cz_registry_is_soap_endpoint(url)
+        if is_soap:
+            req = request.Request(
+                url,
+                data=self._l10n_cz_vat_registry_soap_body(vat),
+                method="POST",
+                headers={
+                    "Content-Type": "text/xml; charset=utf-8",
+                    "SOAPAction": "getStatusNespolehlivySubjektRozsireny",
+                    "Accept": "text/xml,application/xml",
+                    "User-Agent": "Odoo-CZ-VAT-Filing/19",
+                },
+            )
+        else:
+            req = request.Request(
+                url,
+                headers={
+                    "Accept": "application/json,application/xml,text/xml",
+                    "User-Agent": "Odoo-CZ-VAT-Filing/19",
+                },
+            )
         try:
             with request.urlopen(req, timeout=timeout) as response:
-                body = response.read().decode("utf-8")
+                body = response.read().decode("utf-8", errors="replace")
         except (error.HTTPError, error.URLError, TimeoutError, ValueError) as exc:
             return {
                 "status": "error",
@@ -258,37 +477,25 @@ class ResCompany(models.Model):
                 "is_unreliable": False,
                 "published_bank_accounts": [],
             }
+        stripped = (body or "").lstrip()
+        if stripped.startswith("<"):
+            parsed_result = self._l10n_cz_vat_registry_parse_xml_payload(body)
+            parsed_result["source_url"] = url
+            return parsed_result
         try:
             payload = json.loads(body)
         except json.JSONDecodeError:
             return {
                 "status": "error",
-                "error_message": _("VAT registry API response is not valid JSON."),
+                "error_message": _("VAT registry API response is not valid JSON or XML."),
                 "source_url": url,
                 "payload": {"raw": body},
                 "is_unreliable": False,
                 "published_bank_accounts": [],
             }
-
-        unreliable_raw = self._l10n_cz_payload_first_value(
-            payload,
-            [
-                "is_unreliable",
-                "unreliable",
-                "nespolehlivy_platce",
-                "nespolehlivy",
-                "nespolehlivyPlatce",
-            ],
-        )
-        is_unreliable = self._l10n_cz_truthy(unreliable_raw)
-        return {
-            "status": "ok",
-            "error_message": "",
-            "source_url": url,
-            "payload": payload,
-            "is_unreliable": is_unreliable,
-            "published_bank_accounts": self._l10n_cz_extract_bank_accounts(payload),
-        }
+        parsed_result = self._l10n_cz_vat_registry_parse_json_payload(payload)
+        parsed_result["source_url"] = url
+        return parsed_result
 
     def _l10n_cz_vat_registry_cached_check(self, vat):
         self.ensure_one()

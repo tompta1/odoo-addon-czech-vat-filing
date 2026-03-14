@@ -137,6 +137,10 @@ Additional filing controls exposed on `res.company`:
 - `Block Unreliable VAT Payers`
 - `Block Unpublished Supplier Bank Accounts`
 - `Block On VAT Registry Lookup Errors`
+- the shield fetcher accepts both JSON and XML responses; ADIS SOAP endpoint
+  `.../rozhraniCRPDPH.rozhraniCRPDPHSOAP` is posted via
+  `getStatusNespolehlivySubjektRozsireny`
+- VIES-style JSON (`isValid` / `valid`, `userError`) is recognized for general VAT-validation checks
 - `Enable CZ VAT FX Decoupling`
 - `CZ VAT FX API URL`
 - `CZ VAT FX Currency Parameter`
