@@ -3,11 +3,15 @@ import binascii
 import calendar
 import hashlib
 import json
+import logging
+import os
 import re
 import xml.etree.ElementTree as ET
 from datetime import timedelta
 from urllib import error, parse, request
 from xml.sax.saxutils import escape
+
+_logger = logging.getLogger(__name__)
 
 from odoo import _, fields, models
 from odoo.exceptions import UserError
@@ -178,6 +182,39 @@ class ResCompany(models.Model):
         default=20,
         help="HTTP timeout used for ISDS bridge requests.",
     )
+
+    # XSD schema refresh
+    l10n_cz_xsd_dphdp3_url = fields.Char(
+        string="DPHDP3 XSD URL",
+        help=(
+            "URL of the authoritative DPHDP3 XSD schema published by MFČR. "
+            "When set, the 'Refresh XSD Schemas' button will download and replace "
+            "the bundled data/xsd/dphdp3.xsd file."
+        ),
+    )
+    l10n_cz_xsd_dphkh1_url = fields.Char(
+        string="DPHKH1 XSD URL",
+        help=(
+            "URL of the authoritative DPHKH1 XSD schema published by MFČR. "
+            "When set, the 'Refresh XSD Schemas' button will download and replace "
+            "the bundled data/xsd/dphkh1.xsd file."
+        ),
+    )
+    l10n_cz_xsd_dphshv_url = fields.Char(
+        string="DPHSHV XSD URL",
+        help=(
+            "URL of the authoritative DPHSHV XSD schema published by MFČR. "
+            "When set, the 'Refresh XSD Schemas' button will download and replace "
+            "the bundled data/xsd/dphshv.xsd file."
+        ),
+    )
+    l10n_cz_xsd_refresh_log = fields.Text(
+        string="Last XSD Refresh Log",
+        readonly=True,
+        help="Result of the most recent 'Refresh XSD Schemas' run.",
+    )
+    # Internal: JSON dict mapping form name → ETag/Last-Modified for conditional GETs
+    l10n_cz_xsd_etags = fields.Text(default="{}")
 
     def _compute_l10n_cz_vat_filing_history_count(self):
         History = self.env["l10n_cz.vat.filing.history"]
@@ -1532,3 +1569,82 @@ class ResCompany(models.Model):
         action["domain"] = [("company_id", "=", self.id)]
         action["context"] = {"default_company_id": self.id}
         return action
+
+    def action_l10n_cz_refresh_xsd_schemas(self):
+        """Fetch XSD schemas from the configured URLs and overwrite the bundled files.
+
+        Uses conditional GET (If-None-Match / ETag) so unchanged schemas produce
+        a 304 and incur no disk write.  Results are written to l10n_cz_xsd_refresh_log
+        and to the server log.  Gracefully skips any schema whose URL is blank.
+        """
+        self.ensure_one()
+
+        xsd_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "xsd")
+        schemas = [
+            ("DPHDP3", self.l10n_cz_xsd_dphdp3_url),
+            ("DPHKH1", self.l10n_cz_xsd_dphkh1_url),
+            ("DPHSHV", self.l10n_cz_xsd_dphshv_url),
+        ]
+
+        try:
+            etags = json.loads(self.l10n_cz_xsd_etags or "{}")
+        except (ValueError, TypeError):
+            etags = {}
+
+        log_lines = []
+        updated = 0
+        unchanged = 0
+        errored = 0
+
+        for form_name, url in schemas:
+            if not url:
+                log_lines.append(f"{form_name}: no URL configured — skipped")
+                continue
+
+            req = request.Request(url, headers={"User-Agent": "Odoo/l10n_cz_vat_filing"})
+            stored_etag = etags.get(form_name)
+            if stored_etag:
+                req.add_header("If-None-Match", stored_etag)
+
+            try:
+                with request.urlopen(req, timeout=30) as resp:
+                    content = resp.read()
+                    new_etag = resp.headers.get("ETag") or resp.headers.get("Last-Modified", "")
+                    etags[form_name] = new_etag
+                    dest = os.path.join(xsd_dir, f"{form_name.lower()}.xsd")
+                    with open(dest, "wb") as fh:
+                        fh.write(content)
+                    log_lines.append(
+                        f"{form_name}: updated — {len(content):,} bytes"
+                        + (f", ETag: {new_etag}" if new_etag else "")
+                    )
+                    updated += 1
+            except error.HTTPError as exc:
+                if exc.code == 304:
+                    log_lines.append(f"{form_name}: unchanged (304 Not Modified)")
+                    unchanged += 1
+                else:
+                    log_lines.append(f"{form_name}: HTTP {exc.code} {exc.reason}")
+                    errored += 1
+            except Exception as exc:
+                log_lines.append(f"{form_name}: error — {exc}")
+                errored += 1
+
+        timestamp = fields.Datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+        log = f"[{timestamp}]\n" + "\n".join(log_lines)
+        self.write({"l10n_cz_xsd_refresh_log": log, "l10n_cz_xsd_etags": json.dumps(etags)})
+        _logger.info("CZ XSD schema refresh for company %s:\n%s", self.name, log)
+
+        summary = _("Updated: %(u)d  Unchanged: %(s)d  Errors: %(e)d") % {
+            "u": updated, "s": unchanged, "e": errored,
+        }
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("XSD Schema Refresh"),
+                "message": summary,
+                "type": "success" if not errored else "warning",
+                "sticky": False,
+            },
+        }

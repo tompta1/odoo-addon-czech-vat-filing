@@ -60,6 +60,24 @@
               <field name="l10n_cz_isds_target_box_id" invisible="not l10n_cz_isds_enabled"/>
               <field name="l10n_cz_isds_timeout_seconds" invisible="not l10n_cz_isds_enabled"/>
             </group>
+            <group string="XSD Schema Refresh">
+              <field name="l10n_cz_xsd_dphdp3_url" placeholder="https://adisepo.mfcr.cz/…/dphdp3.xsd"/>
+              <field name="l10n_cz_xsd_dphkh1_url" placeholder="https://adisepo.mfcr.cz/…/dphkh1.xsd"/>
+              <field name="l10n_cz_xsd_dphshv_url" placeholder="https://adisepo.mfcr.cz/…/dphshv.xsd"/>
+              <button
+                name="action_l10n_cz_refresh_xsd_schemas"
+                type="object"
+                string="Refresh XSD Schemas"
+                groups="base.group_system"
+                confirm="This will overwrite the bundled XSD files on disk. Continue?"
+              />
+              <field
+                name="l10n_cz_xsd_refresh_log"
+                widget="text"
+                readonly="1"
+                invisible="not l10n_cz_xsd_refresh_log"
+              />
+            </group>
           </group>
         </page>
       </xpath>
