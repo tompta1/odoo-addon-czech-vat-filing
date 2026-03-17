@@ -1,3 +1,4 @@
+from datetime import date
 from unittest.mock import patch
 
 from odoo.exceptions import UserError
@@ -140,13 +141,14 @@ class TestL10nCzVatFxCnb(TransactionCase):
         vals.update(extra)
         return self.Move.create(vals)
 
-    def _mock_fx_result(self, *, status="ok", rate=25.0, error_message=""):
+    def _mock_fx_result(self, *, status="ok", rate=25.0, error_message="", network_error=False):
         return {
             "status": status,
             "error_message": error_message,
             "source_url": "https://example.test/vat-fx",
             "payload": {"status": status},
             "rate_to_czk": rate if status == "ok" else 0.0,
+            "network_error": network_error,
         }
 
     def test_export_uses_cnb_rate_not_accounting_rate_for_foreign_currency_move(self):
@@ -246,3 +248,54 @@ class TestL10nCzVatFxCnb(TransactionCase):
         self.assertAlmostEqual(result["rate_to_czk"], 23.15, places=6)
         self.assertIn("date=15.01.2028", called["url"])
         self.assertNotIn("currency=", called["url"])
+
+    def test_weekend_duzp_falls_back_to_preceding_working_day(self):
+        saturday = date(2028, 3, 18)  # Saturday — no ČNB rate
+        friday = date(2028, 3, 17)    # Friday — rate available
+
+        def _fake_fetch(company_self, currency, tax_date):
+            from odoo import fields as f
+            d = f.Date.to_date(tax_date)
+            if d >= saturday:
+                return self._mock_fx_result(status="error", error_message="HTTP Error 404: Not Found")
+            if d == friday:
+                return self._mock_fx_result(rate=23.5)
+            return self._mock_fx_result(status="error", error_message="unexpected date in test")
+
+        self._set_currency_rate(self.usd, "2028-03-18", 0.04)
+        with patch.object(
+            type(self.company),
+            "_l10n_cz_vat_fx_fetch_rate",
+            autospec=True,
+            side_effect=_fake_fetch,
+        ) as mocked:
+            rate_record = self.company._l10n_cz_vat_fx_get_rate_record(
+                self.usd, saturday, force_refresh=True
+            )
+
+        self.assertEqual(rate_record.status, "ok")
+        self.assertAlmostEqual(rate_record.rate_to_czk, 23.5, places=6)
+        # Cached under the invoice's DUZP (Saturday), rate sourced from Friday
+        self.assertEqual(rate_record.tax_date, saturday)
+        self.assertEqual(rate_record.rate_date, friday)
+        # Called twice: Saturday fails, Friday succeeds
+        self.assertEqual(mocked.call_count, 2)
+
+    def test_network_error_does_not_trigger_fallback(self):
+        monday = date(2028, 3, 20)
+
+        with patch.object(
+            type(self.company),
+            "_l10n_cz_vat_fx_fetch_rate",
+            autospec=True,
+            return_value=self._mock_fx_result(
+                status="error", error_message="connection refused", network_error=True
+            ),
+        ) as mocked:
+            rate_record = self.company._l10n_cz_vat_fx_get_rate_record(
+                self.usd, monday, force_refresh=True
+            )
+
+        self.assertEqual(rate_record.status, "error")
+        # Hard network failure — fallback loop must stop after the first attempt
+        self.assertEqual(mocked.call_count, 1)

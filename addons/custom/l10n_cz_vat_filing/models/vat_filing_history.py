@@ -32,6 +32,8 @@ class L10nCzVatFilingHistory(models.Model):
         [
             ("not_sent", "Not Sent"),
             ("submitted", "Submitted"),
+            ("accepted_by_epo", "Accepted by EPO"),
+            ("rejected_by_epo", "Rejected by EPO"),
             ("error", "Error"),
         ],
         string="Datova Schranka Status",
@@ -47,6 +49,15 @@ class L10nCzVatFilingHistory(models.Model):
     isds_receipt_attachment_id = fields.Many2one(
         "ir.attachment",
         string="ISDS Delivery Receipt",
+        readonly=True,
+        ondelete="set null",
+    )
+    isds_epo_checked_at = fields.Datetime(string="EPO Last Checked", readonly=True)
+    isds_epo_status_raw = fields.Char(string="EPO Raw Status", readonly=True)
+    isds_epo_submission_id = fields.Char(string="EPO Submission ID (IdPodani)", readonly=True)
+    epo_response_attachment_id = fields.Many2one(
+        "ir.attachment",
+        string="EPO Response",
         readonly=True,
         ondelete="set null",
     )
@@ -242,5 +253,47 @@ class L10nCzVatFilingHistory(models.Model):
                 "title": _("Datova Schranka"),
                 "message": _("Submission queued with message ID %s.") % (self.isds_message_id,),
                 "sticky": False,
+            },
+        }
+
+    def action_poll_epo_status(self):
+        self.ensure_one()
+        company = self.company_id
+        if not company.l10n_cz_isds_epo_poll_enabled or not company.l10n_cz_isds_adis_epo_url:
+            raise UserError(
+                _("Configure and enable ADIS EPO status polling on company settings first.")
+            )
+        if self.isds_status not in ("submitted", "error"):
+            raise UserError(
+                _("EPO status polling is only available for filings in 'Submitted' or 'Error' status.")
+            )
+        result = company._l10n_cz_adis_epo_poll_history(self)
+        if result.get("status") == "error":
+            return {
+                "type": "ir.actions.client",
+                "tag": "display_notification",
+                "params": {
+                    "type": "warning",
+                    "title": _("EPO Status Poll"),
+                    "message": result.get("error_message") or _("EPO status check returned an error."),
+                    "sticky": True,
+                },
+            }
+        status_labels = {
+            "accepted": _("Accepted by EPO (Zpracováno)."),
+            "rejected": _("Rejected by EPO (Odmítnut) — check the EPO Response attachment for details."),
+            "pending": _("Pending — EPO has not yet processed this filing."),
+        }
+        notif_type = "success" if result.get("status") == "accepted" else (
+            "danger" if result.get("status") == "rejected" else "info"
+        )
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "type": notif_type,
+                "title": _("EPO Status"),
+                "message": status_labels.get(result.get("status"), _("Unknown status — raw: %s") % (result.get("raw_status") or "",)),
+                "sticky": result.get("status") in ("rejected", "pending"),
             },
         }

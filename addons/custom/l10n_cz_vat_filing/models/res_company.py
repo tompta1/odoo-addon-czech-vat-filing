@@ -8,6 +8,10 @@ import os
 import re
 import xml.etree.ElementTree as ET
 from datetime import timedelta
+
+# ADIS EPO ZjistiStatus response status signatures
+_EPO_ACCEPTED_SIGS = frozenset({"zpracovano", "akceptovano", "prijatoapzpracovano", "zpracovanobezchyb"})
+_EPO_REJECTED_SIGS = frozenset({"odmitnut", "zamitnuto", "chyba", "neplatne", "neprijato", "odmitnutobiychybou"})
 from urllib import error, parse, request
 from xml.sax.saxutils import escape
 
@@ -47,6 +51,7 @@ class ResCompany(models.Model):
     )
     l10n_cz_vat_registry_api_url = fields.Char(
         string="CZ VAT Registry API URL",
+        default="https://adisrws.mfcr.cz/dpr/axis2/services/rozhraniCRPDPH.rozhraniCRPDPHSOAP",
         help=(
             "HTTP endpoint used for supplier VAT status checks. "
             "Use `{vat}` placeholder in the URL or set a query-parameter name below."
@@ -181,6 +186,22 @@ class ResCompany(models.Model):
         string="ISDS Timeout (s)",
         default=20,
         help="HTTP timeout used for ISDS bridge requests.",
+    )
+    l10n_cz_isds_epo_poll_enabled = fields.Boolean(
+        string="Enable EPO Status Polling",
+        help=(
+            "If enabled, a cron job periodically calls the ADIS ZjistiStatus endpoint "
+            "to check whether submitted filings have been accepted or rejected by the Tax Administration."
+        ),
+    )
+    l10n_cz_isds_adis_epo_url = fields.Char(
+        string="ADIS EPO Status URL",
+        default="https://adisepo.mfcr.cz/adistc/adis/idpr/epo/zpracovaniRPDP/ws.asmx",
+        help=(
+            "SOAP endpoint for the ADIS ZjistiStatus operation (EPO filing status). "
+            "Only used when EPO status polling is enabled. "
+            "No ISDS credentials are sent to this endpoint — it is a separate ADIS service."
+        ),
     )
 
     # XSD schema refresh
@@ -1374,6 +1395,15 @@ class ResCompany(models.Model):
         return parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parse.urlencode(query), parsed.fragment))
 
     def _l10n_cz_vat_fx_fetch_rate(self, currency, tax_date):
+        """Fetch the ČNB rate for a single specific date.
+
+        Returns a dict with keys: status, error_message, source_url, payload,
+        rate_to_czk, network_error.
+
+        ``network_error=True`` signals a hard connectivity failure (DNS, timeout,
+        connection refused).  The fallback wrapper uses this flag to stop retrying
+        when the problem is the network, not a missing rate for the requested date.
+        """
         self.ensure_one()
         url = self._l10n_cz_vat_fx_build_url(currency, tax_date)
         if not url:
@@ -1383,19 +1413,34 @@ class ResCompany(models.Model):
                 "source_url": "",
                 "payload": {},
                 "rate_to_czk": 0.0,
+                "network_error": False,
             }
         timeout = max(1, int(self.l10n_cz_vat_fx_timeout_seconds or 10))
         req = request.Request(url, headers={"Accept": "*/*", "User-Agent": "Odoo-CZ-VAT-Filing/19"})
         try:
             with request.urlopen(req, timeout=timeout) as response:
                 body = response.read().decode("utf-8", errors="replace")
-        except (error.HTTPError, error.URLError, TimeoutError, ValueError) as exc:
+        except error.HTTPError as exc:
+            # Server responded with an HTTP error (e.g. 404 for a weekend date).
+            # This is a date-specific failure — the fallback may succeed on the
+            # preceding working day.
             return {
                 "status": "error",
                 "error_message": str(exc),
                 "source_url": url,
                 "payload": {},
                 "rate_to_czk": 0.0,
+                "network_error": False,
+            }
+        except (error.URLError, TimeoutError, ValueError) as exc:
+            # Hard connectivity failure — retrying other dates won't help.
+            return {
+                "status": "error",
+                "error_message": str(exc),
+                "source_url": url,
+                "payload": {},
+                "rate_to_czk": 0.0,
+                "network_error": True,
             }
         try:
             payload = json.loads(body)
@@ -1408,6 +1453,7 @@ class ResCompany(models.Model):
                     "source_url": url,
                     "payload": text_payload,
                     "rate_to_czk": rate,
+                    "network_error": False,
                 }
             return {
                 "status": "error",
@@ -1415,6 +1461,7 @@ class ResCompany(models.Model):
                 "source_url": url,
                 "payload": text_payload,
                 "rate_to_czk": 0.0,
+                "network_error": False,
             }
 
         rate = self._l10n_cz_extract_rate_to_czk(payload, (currency.name or "").upper())
@@ -1425,6 +1472,7 @@ class ResCompany(models.Model):
                 "source_url": url,
                 "payload": payload,
                 "rate_to_czk": 0.0,
+                "network_error": False,
             }
         return {
             "status": "ok",
@@ -1432,7 +1480,46 @@ class ResCompany(models.Model):
             "source_url": url,
             "payload": payload,
             "rate_to_czk": rate,
+            "network_error": False,
         }
+
+    def _l10n_cz_vat_fx_fetch_rate_with_fallback(self, currency, tax_date, max_fallback_days=5):
+        """Fetch the ČNB rate for tax_date, falling back to preceding working days.
+
+        The ČNB publishes rates on working days only.  Per § 38 of the Czech VAT
+        Act, invoices dated on a weekend or public holiday must use the rate of
+        the immediately preceding working day.  This method retries up to
+        max_fallback_days earlier dates until a positive rate is found.
+
+        Hard network failures (URLError, TimeoutError) stop the loop immediately —
+        there is no point querying alternate dates when the server is unreachable.
+
+        Returns the same dict as _l10n_cz_vat_fx_fetch_rate, plus a 'rate_date'
+        key: the actual ČNB date the rate was sourced from (may be earlier than
+        tax_date when a fallback was applied, or None on total failure).
+        """
+        self.ensure_one()
+        base_date = fields.Date.to_date(tax_date)
+        last_result = None
+        for days_back in range(max_fallback_days + 1):
+            attempt_date = base_date - timedelta(days=days_back)
+            result = self._l10n_cz_vat_fx_fetch_rate(currency, attempt_date)
+            if result["status"] == "ok" and result.get("rate_to_czk", 0) > 0:
+                result["rate_date"] = attempt_date
+                return result
+            last_result = result
+            if result.get("network_error"):
+                break  # Hard connectivity failure — don't try other dates
+        last_result = last_result or {
+            "status": "error",
+            "error_message": _("No ČNB rate found within %d days before the tax date.") % (max_fallback_days,),
+            "source_url": "",
+            "payload": {},
+            "rate_to_czk": 0.0,
+            "network_error": False,
+        }
+        last_result["rate_date"] = None
+        return last_result
 
     def _l10n_cz_vat_fx_cached_rate(self, currency, tax_date):
         self.ensure_one()
@@ -1468,11 +1555,12 @@ class ResCompany(models.Model):
             if cached:
                 return cached
 
-        fetched = self._l10n_cz_vat_fx_fetch_rate(currency, tax_date)
+        fetched = self._l10n_cz_vat_fx_fetch_rate_with_fallback(currency, tax_date)
         values = {
             "company_id": self.id,
             "currency_id": currency.id,
             "tax_date": tax_date,
+            "rate_date": fetched.get("rate_date") or tax_date,
             "checked_at": fields.Datetime.now(),
             "status": fetched["status"],
             "rate_to_czk": fetched["rate_to_czk"],
@@ -1504,6 +1592,196 @@ class ResCompany(models.Model):
         if self.l10n_cz_vat_fx_block_on_lookup_error:
             raise UserError(message)
         return None, rate_record
+
+    def _l10n_cz_adis_epo_soap_body(self, dic):
+        """Build the ZjistiStatus SOAP request for ADIS EPO.
+
+        ``dic`` should be the company's Czech VAT number (with or without CZ prefix);
+        the CZ prefix is stripped because ADIS EPO expects the pure numeric DIC.
+        """
+        self.ensure_one()
+        numeric_dic = re.sub(r"^CZ", "", (dic or "").strip().upper())
+        dic_xml = escape(numeric_dic)
+        return (
+            "<?xml version='1.0' encoding='utf-8'?>"
+            "<soapenv:Envelope xmlns:soapenv='http://schemas.xmlsoap.org/soap/envelope/' "
+            "xmlns:adis='http://adis.mfcr.cz/WS_IDPR_EPO_ZPRACOVANI/'>"
+            "<soapenv:Header/>"
+            "<soapenv:Body>"
+            "<adis:ZjistiStatus>"
+            f"<adis:Dic>{dic_xml}</adis:Dic>"
+            "</adis:ZjistiStatus>"
+            "</soapenv:Body>"
+            "</soapenv:Envelope>"
+        ).encode("utf-8")
+
+    def _l10n_cz_adis_epo_parse_zjisti_status(self, response_body):
+        """Parse a ZjistiStatus SOAP response from ADIS EPO.
+
+        Returns a dict:
+          status       – 'accepted' | 'rejected' | 'pending' | 'error'
+          raw_status   – verbatim status text from the XML (empty on parse error)
+          description  – human-readable description element if present
+          id_podani    – EPO-assigned submission ID if present in the response
+          error_message – non-empty only when status == 'error'
+        """
+        self.ensure_one()
+        try:
+            root = ET.fromstring(response_body or "")
+        except ET.ParseError:
+            return {
+                "status": "error",
+                "raw_status": "",
+                "description": "",
+                "id_podani": "",
+                "error_message": _("ADIS EPO response is not valid XML."),
+            }
+
+        fault_text = self._l10n_cz_isds_soap_fault_message(root)
+        if fault_text:
+            return {
+                "status": "error",
+                "raw_status": "",
+                "description": "",
+                "id_podani": "",
+                "error_message": _("ADIS EPO SOAP fault: %s") % (fault_text,),
+            }
+
+        raw_status_values = self._l10n_cz_xml_text_values(
+            root,
+            ["StavZpracovani", "Stav", "Status", "VysledekZpracovani", "StatusZpracovani", "VysledekPodani"],
+        )
+        description_values = self._l10n_cz_xml_text_values(
+            root,
+            ["PopisStavu", "PopisChyby", "Popis", "Description", "StatusMessage", "zprava"],
+        )
+        id_podani_values = self._l10n_cz_xml_text_values(
+            root,
+            ["IdPodani", "IdZpracovani", "idPodani"],
+        )
+
+        raw_status = raw_status_values[0] if raw_status_values else ""
+        description = description_values[0] if description_values else ""
+        id_podani = id_podani_values[0] if id_podani_values else ""
+
+        if not raw_status:
+            return {
+                "status": "error",
+                "raw_status": "",
+                "description": description,
+                "id_podani": id_podani,
+                "error_message": _("ADIS EPO response did not contain a recognisable status field."),
+            }
+
+        sig = self._l10n_cz_key_signature(raw_status)
+        if sig in _EPO_ACCEPTED_SIGS:
+            epo_status = "accepted"
+        elif sig in _EPO_REJECTED_SIGS:
+            epo_status = "rejected"
+        else:
+            # Unknown or intermediate status (e.g. PRIJATO, CEKA) — leave as pending
+            epo_status = "pending"
+
+        return {
+            "status": epo_status,
+            "raw_status": raw_status,
+            "description": description,
+            "id_podani": id_podani,
+            "error_message": "",
+        }
+
+    def _l10n_cz_adis_epo_poll_history(self, history):
+        """Call ADIS ZjistiStatus for one filing history record and update its fields.
+
+        Returns the parsed result dict (same shape as _l10n_cz_adis_epo_parse_zjisti_status).
+        Never raises — network/parse errors are stored on the record and returned as
+        status=='error' so the cron can continue with the next record.
+        """
+        self.ensure_one()
+        history.ensure_one()
+
+        url = (self.l10n_cz_isds_adis_epo_url or "").strip()
+        if not url:
+            return {"status": "error", "raw_status": "", "description": "", "id_podani": "",
+                    "error_message": _("ADIS EPO URL is not configured.")}
+
+        company_vat = self._l10n_cz_normalize_vat(self.partner_id.vat)
+        if not company_vat.startswith("CZ"):
+            return {"status": "error", "raw_status": "", "description": "", "id_podani": "",
+                    "error_message": _("Company has no Czech VAT number for EPO status check.")}
+
+        body = self._l10n_cz_adis_epo_soap_body(company_vat)
+        timeout = max(1, int(self.l10n_cz_isds_timeout_seconds or 20))
+        req = request.Request(
+            url,
+            data=body,
+            method="POST",
+            headers={
+                "Content-Type": "text/xml; charset=utf-8",
+                "SOAPAction": "ZjistiStatus",
+                "Accept": "text/xml,application/xml",
+                "User-Agent": "Odoo-CZ-VAT-Filing/19",
+            },
+        )
+        try:
+            with request.urlopen(req, timeout=timeout) as response:
+                response_body = response.read().decode("utf-8", errors="replace")
+        except (error.HTTPError, error.URLError, TimeoutError, ValueError) as exc:
+            err_text = str(exc)
+            history.write({"isds_epo_checked_at": fields.Datetime.now(), "isds_epo_status_raw": err_text})
+            return {"status": "error", "raw_status": "", "description": "", "id_podani": "",
+                    "error_message": err_text}
+
+        parsed = self._l10n_cz_adis_epo_parse_zjisti_status(response_body)
+
+        write_vals = {
+            "isds_epo_checked_at": fields.Datetime.now(),
+            "isds_epo_status_raw": parsed.get("raw_status") or parsed.get("error_message") or "",
+        }
+        if parsed.get("id_podani"):
+            write_vals["isds_epo_submission_id"] = parsed["id_podani"]
+
+        if parsed["status"] in ("accepted", "rejected"):
+            write_vals["isds_status"] = "accepted_by_epo" if parsed["status"] == "accepted" else "rejected_by_epo"
+            filename = "epo_response.xml" if parsed["status"] == "accepted" else "epo_rejection.xml"
+            attachment = history._create_text_attachment(filename, response_body, "application/xml")
+            write_vals["epo_response_attachment_id"] = attachment.id
+
+        history.write(write_vals)
+        return parsed
+
+    def cron_l10n_cz_poll_epo_status(self):
+        """Cron: poll ADIS ZjistiStatus for all companies with EPO polling enabled."""
+        companies = self.search(
+            [
+                ("l10n_cz_isds_epo_poll_enabled", "=", True),
+                ("l10n_cz_isds_adis_epo_url", "!=", False),
+            ]
+        )
+        if not companies:
+            return True
+        History = self.env["l10n_cz.vat.filing.history"]
+        poll_threshold = fields.Datetime.now() - timedelta(hours=1)
+        for company in companies:
+            pending = History.search(
+                [
+                    ("company_id", "=", company.id),
+                    ("isds_status", "=", "submitted"),
+                    "|",
+                    ("isds_epo_checked_at", "=", False),
+                    ("isds_epo_checked_at", "<=", poll_threshold),
+                ]
+            )
+            for history in pending:
+                try:
+                    company._l10n_cz_adis_epo_poll_history(history)
+                except Exception:
+                    _logger.exception(
+                        "EPO status poll failed for filing history %s (company %s)",
+                        history.id,
+                        company.name,
+                    )
+        return True
 
     def cron_l10n_cz_refresh_vat_fx_rates(self):
         companies = self.search(

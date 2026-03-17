@@ -92,7 +92,14 @@ class TestL10nCzVatFilingExport(TransactionCase):
 
     @classmethod
     def _setup_company(cls):
-        cls.company.write({"account_fiscal_country_id": cls.cz.id})
+        cls.company.write({
+            "account_fiscal_country_id": cls.cz.id,
+            # Ensure FX enforcement is off; TestL10nCzVatFxCnb.setUpClass writes
+            # enforce_cnb=True to the shared company and that persists across test
+            # sessions since setUpClass changes are outside any savepoint.
+            "l10n_cz_vat_fx_enforce_cnb": False,
+            "l10n_cz_vat_registry_enabled": False,
+        })
         cls.company.partner_id.with_context(no_vat_validation=True).write(
             {
                 "name": cls.company.name or "CZ Filing Test Company",

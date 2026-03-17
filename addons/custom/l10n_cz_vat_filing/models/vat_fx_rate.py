@@ -9,6 +9,12 @@ class L10nCzVatFxRate(models.Model):
     company_id = fields.Many2one("res.company", required=True, index=True, ondelete="cascade")
     currency_id = fields.Many2one("res.currency", required=True, index=True, ondelete="cascade")
     tax_date = fields.Date(required=True, index=True)
+    rate_date = fields.Date(
+        help=(
+            "Actual ČNB working-day date the rate was sourced from. "
+            "Differs from tax_date when a weekend/holiday fallback was applied."
+        ),
+    )
     checked_at = fields.Datetime(required=True, default=fields.Datetime.now, index=True)
     status = fields.Selection(
         [("ok", "OK"), ("error", "Error")],

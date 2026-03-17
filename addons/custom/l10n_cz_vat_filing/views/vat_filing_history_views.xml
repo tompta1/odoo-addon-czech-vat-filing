@@ -54,6 +54,8 @@
               <field name="dphshv_attachment_id" readonly="1"/>
               <field name="debug_attachment_id" readonly="1"/>
               <field name="isds_receipt_attachment_id" readonly="1"/>
+              <field name="epo_response_attachment_id" readonly="1"
+                     invisible="not epo_response_attachment_id"/>
             </group>
           </group>
           <group string="Datova Schranka (ISDS)">
@@ -64,6 +66,12 @@
                 string="Submit via Datova Schranka"
                 class="oe_highlight"
               />
+              <button
+                name="action_poll_epo_status"
+                type="object"
+                string="Check EPO Status"
+                invisible="isds_status not in ('submitted', 'error')"
+              />
               <field name="isds_status" readonly="1"/>
               <field name="isds_submitted_at" readonly="1"/>
               <field name="isds_target_box_id" readonly="1"/>
@@ -72,6 +80,12 @@
             <group>
               <field name="isds_delivery_info" readonly="1"/>
               <field name="isds_last_error" readonly="1"/>
+              <field name="isds_epo_checked_at" readonly="1"
+                     invisible="not isds_epo_checked_at"/>
+              <field name="isds_epo_status_raw" readonly="1"
+                     invisible="not isds_epo_status_raw"/>
+              <field name="isds_epo_submission_id" readonly="1"
+                     invisible="not isds_epo_submission_id"/>
             </group>
             <group>
               <field name="isds_response_json" readonly="1" nolabel="1"/>
