@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  XSD schema for the DPHKH1 (Kontrolní hlášení DPH) XML form.
+
+  Derived from the Odoo l10n_cz_vat_filing generator.
+  For authoritative MFČR schemas see https://adisepo.mfcr.cz/
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <!-- Czech date format: DD.MM.YYYY -->
+  <xs:simpleType name="CzDate">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="\d{2}\.\d{2}\.\d{4}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:element name="Pisemnost">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="DPHKH1">
+          <xs:complexType>
+            <xs:sequence>
+
+              <!-- Header: submission metadata -->
+              <xs:element name="VetaD">
+                <xs:complexType>
+                  <xs:attribute name="dokument"    type="xs:string" use="required"/>
+                  <xs:attribute name="k_uladis"    type="xs:string" use="required"/>
+                  <xs:attribute name="d_poddp"     type="CzDate"    use="required"/>
+                  <xs:attribute name="rok"         type="xs:string" use="required"/>
+                  <xs:attribute name="khdph_forma" use="required">
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:enumeration value="B"/>
+                        <xs:enumeration value="N"/>
+                        <xs:enumeration value="E"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:anyAttribute processContents="lax"/>
+                </xs:complexType>
+              </xs:element>
+
+              <!-- Taxpayer contact/address -->
+              <xs:element name="VetaP">
+                <xs:complexType>
+                  <xs:attribute name="dic"       type="xs:string" use="required"/>
+                  <xs:attribute name="c_ufo"     type="xs:string" use="required"/>
+                  <xs:attribute name="c_pracufo" type="xs:string" use="required"/>
+                  <xs:anyAttribute processContents="lax"/>
+                </xs:complexType>
+              </xs:element>
+
+              <!-- Section A1: purchase challenge lines -->
+              <xs:element name="VetaA1" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:anyAttribute processContents="lax"/>
+                </xs:complexType>
+              </xs:element>
+
+              <!-- Section A2: EU supplier breakdown -->
+              <xs:element name="VetaA2" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:anyAttribute processContents="lax"/>
+                </xs:complexType>
+              </xs:element>
+
+              <!-- Section A4: other purchase data -->
+              <xs:element name="VetaA4" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:anyAttribute processContents="lax"/>
+                </xs:complexType>
+              </xs:element>
+
+              <!-- Section A5: purchase summary (optional) -->
+              <xs:element name="VetaA5" minOccurs="0">
+                <xs:complexType>
+                  <xs:anyAttribute processContents="lax"/>
+                </xs:complexType>
+              </xs:element>
+
+              <!-- Section B1: supply challenge lines -->
+              <xs:element name="VetaB1" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:anyAttribute processContents="lax"/>
+                </xs:complexType>
+              </xs:element>
+
+              <!-- Section B2: supply breakdown -->
+              <xs:element name="VetaB2" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:anyAttribute processContents="lax"/>
+                </xs:complexType>
+              </xs:element>
+
+              <!-- Section B3: supply summary (optional) -->
+              <xs:element name="VetaB3" minOccurs="0">
+                <xs:complexType>
+                  <xs:anyAttribute processContents="lax"/>
+                </xs:complexType>
+              </xs:element>
+
+              <!-- Control totals (always present) -->
+              <xs:element name="VetaC">
+                <xs:complexType>
+                  <xs:anyAttribute processContents="lax"/>
+                </xs:complexType>
+              </xs:element>
+
+            </xs:sequence>
+            <xs:anyAttribute processContents="lax"/>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+      <xs:anyAttribute processContents="lax"/>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

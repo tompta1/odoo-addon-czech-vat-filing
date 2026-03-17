@@ -1,5 +1,7 @@
 import calendar
 import json
+import logging
+import os
 import re
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
@@ -8,6 +10,8 @@ from xml.etree import ElementTree as ET
 
 from odoo import fields, models, _
 from odoo.exceptions import UserError
+
+_logger = logging.getLogger(__name__)
 
 
 TWOPLACES = Decimal("0.01")
@@ -2042,14 +2046,61 @@ class L10nCzVatFilingExport(models.AbstractModel):
             "sh": snapshot["sh"],
         }
 
+    def _validate_xml_against_xsd(self, xml_string, form_name):
+        """Parse xml_string and validate against bundled XSD. Raises UserError on failure."""
+        try:
+            from lxml import etree as lxml_etree
+        except ImportError:
+            _logger.warning("lxml not installed; skipping XSD validation for %s", form_name)
+            return
+
+        xsd_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "data", "xsd", f"{form_name.lower()}.xsd",
+        )
+        if not os.path.isfile(xsd_path):
+            _logger.warning("XSD schema not found for %s at %s; skipping", form_name, xsd_path)
+            return
+
+        try:
+            with open(xsd_path, "rb") as fh:
+                schema = lxml_etree.XMLSchema(lxml_etree.parse(fh))
+            doc = lxml_etree.fromstring(xml_string.encode("utf-8"))
+            schema.assertValid(doc)
+        except lxml_etree.DocumentInvalid as exc:
+            errors = "\n".join(str(e) for e in schema.error_log)
+            raise UserError(
+                _("XSD validation failed for %(form)s:\n%(errors)s") % {
+                    "form": form_name, "errors": errors,
+                }
+            ) from exc
+        except lxml_etree.XMLSyntaxError as exc:
+            raise UserError(
+                _("XML syntax error in %(form)s: %(error)s") % {
+                    "form": form_name, "error": str(exc),
+                }
+            ) from exc
+
     def build_exports(self, company, date_from, date_to, options=None):
         snapshot = self._build_snapshot(company, date_from, date_to, options or {})
         debug_payload = self._debug_payload(snapshot)
         requested_forms = snapshot["requested_forms"]
+
+        dphdp3_xml = self._dphdp3_xml(snapshot) if requested_forms["dphdp3"] else None
+        dphkh1_xml = self._dphkh1_xml(snapshot) if requested_forms["dphkh1"] else None
+        dphshv_xml = self._dphshv_xml(snapshot) if requested_forms["dphshv"] else None
+
+        if dphdp3_xml:
+            self._validate_xml_against_xsd(dphdp3_xml, "DPHDP3")
+        if dphkh1_xml:
+            self._validate_xml_against_xsd(dphkh1_xml, "DPHKH1")
+        if dphshv_xml:
+            self._validate_xml_against_xsd(dphshv_xml, "DPHSHV")
+
         return {
             "debug": debug_payload,
             "debug_json": json.dumps(debug_payload, ensure_ascii=False, indent=2, sort_keys=True),
-            "dphdp3_xml": self._dphdp3_xml(snapshot) if requested_forms["dphdp3"] else None,
-            "dphkh1_xml": self._dphkh1_xml(snapshot) if requested_forms["dphkh1"] else None,
-            "dphshv_xml": self._dphshv_xml(snapshot) if requested_forms["dphshv"] else None,
+            "dphdp3_xml": dphdp3_xml,
+            "dphkh1_xml": dphkh1_xml,
+            "dphshv_xml": dphshv_xml,
         }
