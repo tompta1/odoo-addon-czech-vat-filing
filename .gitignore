@@ -1,17 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Odoo runtime
+config/odoo.conf
 .env
 .env.*
 !.env.example
 
-config/odoo.conf
-scripts/odoo_isds_smoke_test.sh
-
-__pycache__/
-*.py[cod]
-
+# Third-party addon trees (checked out separately)
 addons/.odoomates-source/
 addons/odoomates/
 addons/odoomates-*/
 
+# Release artifacts
+dist/
+
+# Crypto / signing
 *.p7m
 *.p7s
 *.p12
@@ -22,8 +27,5 @@ addons/odoomates-*/
 *.cer
 *.der
 
-accountant_laws_rag_v3_chunked.jsonl
-
+# Logs
 *.log
-
-dist/

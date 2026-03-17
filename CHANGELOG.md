@@ -1,60 +1,43 @@
 # Changelog
 
-## 2026-03-14 - Release Candidate `v19.0.23.0.0`
+## 2026-03-17 — `v19.0.24.0.0`
+
+### `l10n_cz_vat_filing` `19.0.24.0.0`
+
+- **SEPA/Batch Payment Registry Shield** — hooks `account.batch.payment.validate()` via soft dependency on the Enterprise `account_batch_payment` module; collects all violations across the batch before raising a single `UserError`; silently skipped on Odoo CE.
+- **Async EPO Status Polling** — manual "Check EPO Status" button on filing history (visible for `submitted` and `error` states); polls ADIS EPO `ZjistiStatus` SOAP endpoint only; never calls `GetListOfReceivedMessages`; opt-in cron inactive by default; security warning banner on ISDS credentials settings.
+- **Default URL prefill** — `post_init_hook` backfills `l10n_cz_vat_registry_api_url` (ADIS SOAP) and `l10n_cz_vat_fx_api_url` (ČNB daily rate feed) for existing company records on fresh install.
+- **Weekend/Holiday ČNB FX Fallback (§ 38 Czech VAT Act)** — when no ČNB rate is published for the DUZP (weekend/public holiday), retries up to 5 preceding calendar days; stores actual rate date separately from DUZP in `l10n_cz.vat.fx.rate.rate_date`; hard network errors abort the fallback immediately.
+- Test isolation fix: `TestL10nCzVatFilingExport._setup_company` now explicitly resets `l10n_cz_vat_fx_enforce_cnb=False` to prevent cross-session DB contamination.
+
+## 2026-03-14 — `v19.0.23.0.0`
 
 ### `l10n_cz_vat_filing` `19.0.23.0.0`
-- Removed the obsolete `l10n_cz_kh_draft` addon tree and the leftover draft KH export model from the main filing addon.
-- Hardened VAT registry payment shielding so outbound supplier payments require a selected bank account when unpublished-account blocking is enabled.
-- Reduced Czech filing move selection to a DUZP-aware search domain instead of scanning all posted invoice/refund moves.
-- Fixed tag-presence checks so correction/bad-debt logic no longer depends on summed tag amounts being non-zero.
-- Added regression tests for payment shielding and tag-presence behavior.
+- Removed the obsolete `l10n_cz_kh_draft` addon tree.
+- Hardened VAT registry payment shielding to require a selected bank account when unpublished-account blocking is enabled.
+- Reduced filing move selection to a DUZP-aware search domain.
+- Fixed tag-presence checks so bad-debt/correction logic no longer depends on summed tag amounts being non-zero.
+- Added pre-flight XSD validation and admin XSD schema refresh action.
 
 ### `l10n_cz_vat_oss_bridge` `19.0.3.0.0`
-- Reset `l10n_cz_vat_regime` back to `standard` when OSS/IOSS markers are removed from a move.
-- Added regression coverage for regime reset after tax-tag changes.
+- Reset `l10n_cz_vat_regime` to `standard` when OSS/IOSS tax tags are removed from a move.
 
 ### `odoo19_report_compat` `19.0.2.0.0`
-- Fixed multi-record payslip refunds so the returned action includes all generated refund payslips.
-- Guarded the contribution-register report against empty register selections.
-- Render analytic distribution names instead of raw analytic account IDs in the journal entries report.
-- Added focused compatibility tests for the report helper methods.
+- Fixed multi-record payslip refund action.
+- Guarded contribution-register report against empty selection.
+- Render analytic distribution names in journal entries report.
 
-## 2026-03-14 - Workspace Licensing Update
-
-- Switched workspace `LICENSE` from `LGPL-3.0-or-later` to `MIT`.
-- Updated custom addon manifests to `license: MIT`.
-- Added explicit README notes clarifying MIT no-warranty terms for custom code and upstream-license boundaries for third-party addons.
-
-## 2026-03-14 - Release Candidate `v19.0.22.0.0`
+## 2026-03-14 — `v19.0.22.0.0`
 
 ### `l10n_cz_vat_filing` `19.0.22.0.0`
-- Added Czech VAT FX decoupling settings on company for DUZP-based foreign-currency conversion.
-- Added cached DUZP FX-rate model (`l10n_cz.vat.fx.rate`) and a daily cron refresher.
-- Added move-level VAT FX audit fields (`manual rate`, `applied rate`, `source`, `rate record`, `note`).
-- Added posting-time VAT FX resolution before Czech VAT export logic.
-- Updated VAT export amount computation to use DUZP VAT FX conversion for foreign-currency lines instead of accounting balances when enabled.
-- Added automated tests for CBN/API-rate decoupling, manual rate override, and blocking lookup-error policy.
+- Added ČNB FX decoupling: DUZP-based foreign-currency rate resolution, cached `l10n_cz.vat.fx.rate` model, daily cron refresher, move-level audit fields, and blocking-error policy.
 
-## 2026-03-14 - Release Candidate `v19.0.21.0.0`
+## 2026-03-14 — `v19.0.21.0.0`
 
 ### `l10n_cz_vat_filing` `19.0.21.0.0`
-- Added Czech VAT-registry shield settings on company (`API URL`, timeout, cache TTL, blocking policy toggles).
-- Added cached supplier registry-check model for audit and re-use (`l10n_cz.vat.registry.check`).
-- Added vendor-bill posting guard (`in_invoice`, `in_refund`) for unreliable payer and unpublished supplier bank-account checks.
-- Added supplier-payment posting guard (`account.payment` outbound supplier payments) using the same registry evaluation.
-- Added vendor-document audit fields: latest registry check link and note.
-- Added automated tests for unreliable-payer blocking, bank mismatch blocking, positive pass path, cache reuse, and lookup-error non-blocking mode.
+- Added VAT Registry Shield: ADIS SOAP lookup, `l10n_cz.vat.registry.check` model, vendor-bill and supplier-payment posting guards, and audit fields.
 
-## 2026-03-14 - Release Candidate `v19.0.20.0.0`
+## 2026-03-14 — `v19.0.20.0.0`
 
 ### `l10n_cz_vat_filing` `19.0.20.0.0`
-- Added CZK-normalized KH threshold routing for domestic `A4/A5` and `B2/B3` classification, including foreign-currency invoices.
-- Added origin-aware refund routing for under-threshold B2B credit notes through `reversed_entry_id`.
-- Added XML-level KH assertions for `VetaA4`, `VetaA5`, `VetaB2`, and `VetaB3`.
-- Added regression tests for `B2B` under/over `10.000 CZK`, `B2C` over `10.000 CZK`, refund routing, and foreign-currency threshold behavior.
-
-### `l10n_cz_vat_oss_bridge` `19.0.2.0.0`
-- No code changes in this release candidate.
-
-### `odoo19_report_compat` `19.0.1.0.0`
-- No code changes in this release candidate.
+- Added CZK-normalised KH threshold routing for A4/A5 and B2/B3 including foreign-currency invoices and origin-aware refund routing.

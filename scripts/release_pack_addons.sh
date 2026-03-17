@@ -38,7 +38,7 @@ mkdir -p "${release_dir}"
 
 declare -a archives
 for addon in "${addons[@]}"; do
-  addon_dir="${repo_root}/addons/custom/${addon}"
+  addon_dir="${repo_root}/addons/${addon}"
   manifest_path="${addon_dir}/__manifest__.py"
   if [[ ! -d "${addon_dir}" ]]; then
     echo "Addon not found: ${addon_dir}" >&2
@@ -59,7 +59,7 @@ for addon in "${addons[@]}"; do
   archive_path="${release_dir}/${archive_name}"
 
   (
-    cd "${repo_root}/addons/custom"
+    cd "${repo_root}/addons"
     zip -rq "${archive_path}" "${addon}"
   )
 
